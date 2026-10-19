@@ -5,8 +5,9 @@ import time
 import socket
 import threading
 from typing import Optional, Dict, Any, List
+import requests
 from fastapi import FastAPI, Query, HTTPException, Header, Request
-from fastapi.responses import FileResponse, Response, JSONResponse
+from fastapi.responses import FileResponse, Response, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.background import BackgroundTask
@@ -554,6 +555,68 @@ def get_stream(video_id: str):
     try:
         data = stream_downloader.get_cached_or_local_stream(video_id)
         return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.api_route("/api/download/stream/{video_id}", methods=["GET", "HEAD"])
+def stream_download_proxy(video_id: str, request: Request):
+    """
+    Direct streaming proxy that pipes audio chunks directly from Google CDN / YouTube
+    to the client phone without storing to iPhone 7 disk or re-encoding with FFmpeg.
+    """
+    try:
+        # Check if local file exists first (e.g. from legacy library)
+        local_path = stream_downloader.get_local_track_path(video_id)
+        if local_path and os.path.isfile(local_path):
+            filename = os.path.basename(local_path)
+            media_type = "audio/mpeg" if local_path.endswith(".mp3") else "audio/mp4"
+            return FileResponse(local_path, media_type=media_type, filename=filename)
+
+        data = stream_downloader.get_cached_or_local_stream(video_id)
+        stream_url = data.get("url")
+        if not stream_url:
+            raise HTTPException(status_code=404, detail="Could not resolve stream URL")
+
+        # Stream directly from upstream Google CDN
+        req = requests.get(
+            stream_url,
+            stream=True,
+            timeout=20,
+            headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)"}
+        )
+        if req.status_code != 200:
+            raise HTTPException(status_code=req.status_code, detail="Upstream stream fetch failed")
+
+        content_length = req.headers.get("Content-Length")
+        content_type = req.headers.get("Content-Type", "audio/mp4")
+
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-cache",
+        }
+        if content_length:
+            headers["Content-Length"] = content_length
+
+        if request.method == "HEAD":
+            req.close()
+            return Response(status_code=200, headers=headers, media_type=content_type)
+
+        def iter_chunks():
+            try:
+                for chunk in req.iter_content(chunk_size=65536):
+                    if chunk:
+                        yield chunk
+            finally:
+                req.close()
+
+        return StreamingResponse(
+            iter_chunks(),
+            media_type=content_type,
+            headers=headers
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -2357,7 +2357,7 @@
         for (const t of tracks) {
           const exists = await SpotiDB.getTrack(t.id);
           if (!exists) {
-            downloadSingleTrack(t.id, t.title, t.artist, t.thumbnail);
+            await downloadSingleTrack(t.id, t.title, t.artist, t.thumbnail);
             count++;
           }
         }
@@ -2693,6 +2693,8 @@
       downloadSingleTrack(currentTrack.id, currentTrack.title, currentTrack.artist, currentTrack.thumbnail);
     }
 
+    const activeDownloads = new Set();
+
     async function downloadSingleTrack(id, title, artist, thumbnail = '') {
       // 1. Check if already in device IndexedDB
       const existing = await SpotiDB.getTrack(id);
@@ -2701,85 +2703,104 @@
         return;
       }
 
+      if (activeDownloads.has(id)) {
+        return; // Already in-flight
+      }
+
+      if (!navigator.onLine) {
+        showToast('⚠️ Download unavailable while offline.');
+        updateDownloadProgressUI(id, 0, 'error');
+        return;
+      }
+
+      // If ID is external (e.g. ext_...), resolve to YouTube ID first
+      if (id && (id.startsWith('ext_') || id.length !== 11)) {
+        try {
+          const resolvedId = await ensureTrackHasYtId({ id, title, artist });
+          if (resolvedId && resolvedId.length === 11) {
+            id = resolvedId;
+          }
+        } catch (e) {
+          console.warn("Could not resolve external track ID:", e);
+        }
+      }
+
+      activeDownloads.add(id);
+
       // Show initial circular progress ring immediately on UI
       updateDownloadProgressUI(id, 5, 'downloading');
 
       try {
-        await fetch(`/api/download/${id}?title=${encodeURIComponent(title || '')}&artist=${encodeURIComponent(artist || '')}`, { method: 'POST' });
-        
-        // Poll status until download completes on iPhone 7 server
-        let pollCount = 0;
-        const poller = setInterval(async () => {
-          pollCount++;
-          try {
-            const res = await fetch('/api/downloads/status');
-            const data = await res.json();
-            const info = data && data[id];
-            if (info) {
-              if (info.status === 'downloading' || info.status === 'extracting') {
-                const sPct = info.percent ? Math.round(info.percent * 0.85) : 15;
-                updateDownloadProgressUI(id, Math.max(10, sPct), 'downloading');
-              } else if (info.status === 'ready_for_transfer' || info.status === 'completed') {
-                clearInterval(poller);
-                updateDownloadProgressUI(id, 90, 'downloading');
-                
-                // Convert thumbnail image to base64 data URI in parallel with file transfer
-                const thumbPromise = convertImageUrlToBase64(thumbnail || (currentTrack && currentTrack.id === id ? currentTrack.thumbnail : ''));
+        // Convert thumbnail image to base64 data URI in parallel with streaming transfer
+        const thumbPromise = convertImageUrlToBase64(thumbnail || (currentTrack && currentTrack.id === id ? currentTrack.thumbnail : ''));
 
-                // Fetch binary audio stream from server (iPhone 7 auto-deletes file immediately after delivery)
-                const fileRes = await fetch(`/api/download/file/${id}`);
-                if (!fileRes.ok) throw new Error("File transfer failed from server");
-                const blob = await fileRes.blob();
+        // Fast streaming proxy: pipes Google CDN audio directly to client
+        const response = await fetch(`/api/download/stream/${id}`);
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+        }
 
-                updateDownloadProgressUI(id, 98, 'downloading');
-                const finalThumb = await thumbPromise;
+        const contentLength = response.headers.get('content-length');
+        const totalBytes = contentLength ? parseInt(contentLength, 10) : 0;
+        let receivedBytes = 0;
 
-                // Save to phone IndexedDB
-                const trackRecord = {
-                  id: id,
-                  title: title || (currentTrack && currentTrack.id === id ? currentTrack.title : id),
-                  artist: artist || (currentTrack && currentTrack.id === id ? currentTrack.artist : 'Unknown Artist'),
-                  duration: (currentTrack && currentTrack.id === id ? currentTrack.duration : '--:--'),
-                  thumbnail: finalThumb || (currentTrack && currentTrack.id === id ? currentTrack.thumbnail : ''),
-                  album: (currentTrack && currentTrack.id === id ? currentTrack.album : ''),
-                  blob: blob,
-                  sizeFormatted: (blob.size / (1024 * 1024)).toFixed(1) + ' MB'
-                };
-                await SpotiDB.saveTrack(trackRecord);
-                await refreshOfflineTrackIds();
+        const reader = response.body.getReader();
+        const chunks = [];
 
-                // Morph ring into completed green checkmark
-                updateDownloadProgressUI(id, 100, 'completed');
-
-                // If currently playing in drawer, hide the download button immediately
-                const drawerDlBtn = document.getElementById('drawer-download-btn');
-                if (drawerDlBtn && currentTrack && currentTrack.id === id) {
-                  drawerDlBtn.classList.add('hidden');
-                }
-
-                // Suppress success / cleanup toast bubbles as requested
-                if (typeof loadLibrary === 'function') loadLibrary();
-                if (typeof loadUserPlaylists === 'function') loadUserPlaylists();
-                if (activePlaylistId === 'user_pl_offline_downloads') {
-                  openPlaylist('user_pl_offline_downloads', true);
-                }
-              } else if (info.status === 'error') {
-                clearInterval(poller);
-                updateDownloadProgressUI(id, 0, 'error');
-                showToast(`⚠️ Download error: ${info.error || 'Failed'}`);
-              }
-            }
-          } catch (e) {
-            console.error("Poll/transfer error:", e);
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          receivedBytes += value.length;
+          if (totalBytes > 0) {
+            const pct = Math.min(95, Math.max(10, Math.round((receivedBytes / totalBytes) * 90)));
+            updateDownloadProgressUI(id, pct, 'downloading');
+          } else {
+            updateDownloadProgressUI(id, 50, 'downloading');
           }
-          if (pollCount > 90) {
-            clearInterval(poller);
-            updateDownloadProgressUI(id, 0, 'error');
-          }
-        }, 1500);
+        }
+
+        updateDownloadProgressUI(id, 96, 'downloading');
+
+        const contentType = response.headers.get('content-type') || 'audio/mp4';
+        const blob = new Blob(chunks, { type: contentType });
+        const finalThumb = await thumbPromise;
+
+        // Save to phone IndexedDB
+        const trackRecord = {
+          id: id,
+          title: title || (currentTrack && currentTrack.id === id ? currentTrack.title : id),
+          artist: artist || (currentTrack && currentTrack.id === id ? currentTrack.artist : 'Unknown Artist'),
+          duration: (currentTrack && currentTrack.id === id ? currentTrack.duration : '--:--'),
+          thumbnail: finalThumb || (currentTrack && currentTrack.id === id ? currentTrack.thumbnail : ''),
+          album: (currentTrack && currentTrack.id === id ? currentTrack.album : ''),
+          blob: blob,
+          sizeFormatted: (blob.size / (1024 * 1024)).toFixed(1) + ' MB'
+        };
+        await SpotiDB.saveTrack(trackRecord);
+        await refreshOfflineTrackIds();
+
+        // Morph ring into completed green checkmark
+        updateDownloadProgressUI(id, 100, 'completed');
+
+        // If currently playing in drawer, hide the download button immediately
+        const drawerDlBtn = document.getElementById('drawer-download-btn');
+        if (drawerDlBtn && currentTrack && currentTrack.id === id) {
+          drawerDlBtn.classList.add('hidden');
+        }
+
+        // Refresh libraries and playlists
+        if (typeof loadLibrary === 'function') loadLibrary();
+        if (typeof loadUserPlaylists === 'function') loadUserPlaylists();
+        if (activePlaylistId === 'user_pl_offline_downloads') {
+          openPlaylist('user_pl_offline_downloads', true);
+        }
       } catch (e) {
-        updateDownloadProgressUI(id, 0, 'error');
         console.error("Download error:", e);
+        updateDownloadProgressUI(id, 0, 'error');
+        showToast(`⚠️ Download error: ${e.message || 'Failed'}`);
+      } finally {
+        activeDownloads.delete(id);
       }
     }
 
