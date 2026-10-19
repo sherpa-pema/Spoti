@@ -661,6 +661,7 @@
     let repeatMode = 0; // 0: none, 1: all, 2: one
     let currentSearchFilter = 'songs';
     let activeTab = 'home';
+    const tabScrollPositions = { home: 0, search: 0, library: 0, playlist: 0 };
     let librarySubtab = 'playlists';
     let activePlaylistId = null;
     let activePlaylistIsUser = false;
@@ -833,10 +834,10 @@
     }
 
     function renderDownloadBtnHtml(track) {
-      const isDownloaded = offlineTrackIdSet.has(track.id);
+      const isDownloaded = offlineTrackIdSet.has(track.id) || (track.yt_id && offlineTrackIdSet.has(track.yt_id));
       if (isDownloaded) {
         return `
-          <div data-dl-btn="${track.id}" class="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0" title="Saved to device">
+          <div data-dl-btn="${track.id}" ${track.yt_id ? `data-dl-orig="${track.id}" data-dl-btn="${track.yt_id}"` : ''} class="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0" title="Saved to device">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
           </div>
         `;
@@ -848,8 +849,12 @@
       `;
     }
 
-    function updateDownloadProgressUI(trackId, percent, status) {
-      const elements = document.querySelectorAll(`[data-dl-btn="${trackId}"]`);
+    function updateDownloadProgressUI(trackId, percent, status, origId = null) {
+      let selector = `[data-dl-btn="${trackId}"]`;
+      if (origId && origId !== trackId) {
+        selector += `, [data-dl-btn="${origId}"], [data-dl-orig="${origId}"]`;
+      }
+      const elements = document.querySelectorAll(selector);
       if (!elements || elements.length === 0) return;
 
       const pct = Math.max(0, Math.min(100, Math.round(percent || 0)));
@@ -857,21 +862,24 @@
       const offset = circumference - (circumference * pct / 100);
 
       elements.forEach(el => {
+        const associatedOrigId = origId || el.getAttribute('data-dl-orig') || '';
+        const origAttr = associatedOrigId ? `data-dl-orig="${associatedOrigId}"` : '';
+
         if (status === 'completed') {
           el.outerHTML = `
-            <div data-dl-btn="${trackId}" class="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 transition duration-300 animate-pulse" title="Saved to device">
+            <div data-dl-btn="${trackId}" ${origAttr} class="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 transition duration-300 animate-pulse" title="Saved to device">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
             </div>
           `;
         } else if (status === 'error') {
           el.outerHTML = `
-            <button onclick="event.stopPropagation(); promptDownloadTrack({id: '${trackId}'})" data-dl-btn="${trackId}" class="w-8 h-8 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center shrink-0 active:scale-95" title="Download failed. Tap to retry.">
+            <button onclick="event.stopPropagation(); promptDownloadTrack({id: '${trackId}'})" data-dl-btn="${trackId}" ${origAttr} class="w-8 h-8 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center shrink-0 active:scale-95" title="Download failed. Tap to retry.">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
             </button>
           `;
         } else {
           el.outerHTML = `
-            <div data-dl-btn="${trackId}" class="relative w-8 h-8 flex items-center justify-center shrink-0" title="Downloading ${pct}%">
+            <div data-dl-btn="${trackId}" ${origAttr} class="relative w-8 h-8 flex items-center justify-center shrink-0" title="Downloading ${pct}%">
               <svg class="w-8 h-8 -rotate-90" viewBox="0 0 36 36">
                 <circle cx="18" cy="18" r="14" fill="none" stroke="currentColor" stroke-width="3" class="text-white/10" />
                 <circle cx="18" cy="18" r="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" class="text-indigo-400 transition-all duration-300" stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" />
@@ -1303,7 +1311,16 @@
         return;
       }
 
+      const mainContent = document.getElementById('main-content');
+      if (mainContent && activeTab) {
+        tabScrollPositions[activeTab] = mainContent.scrollTop;
+      }
+
       activeTab = tab;
+      if (tab !== 'playlist') {
+        activePlaylistId = null;
+      }
+
       ['home', 'search', 'library', 'playlist'].forEach(t => {
         const el = document.getElementById(`tab-${t}`);
         if (el) el.classList.add('hidden');
@@ -1320,6 +1337,13 @@
       if (tab === 'library') {
         if (librarySubtab === 'playlists') loadUserPlaylists();
         else loadLibrary();
+      }
+
+      if (mainContent) {
+        const savedPos = tabScrollPositions[tab] || 0;
+        requestAnimationFrame(() => {
+          mainContent.scrollTop = savedPos;
+        });
       }
     }
 
@@ -1539,7 +1563,7 @@
     // -------------------------------------------------------------
     function promptDownloadTrack(track) {
       if (!track) return;
-      trackPendingAddToPlaylist = track;
+      trackPendingAddToPlaylist = { ...track, original_id: track.id };
       const titleEl = document.getElementById('add-modal-song-title');
       if (titleEl) {
         titleEl.innerText = `${track.title} • ${track.artist || 'Unknown'}`;
@@ -1571,9 +1595,21 @@
     async function confirmQuickDownload() {
       if (!trackPendingAddToPlaylist) return;
       const t = trackPendingAddToPlaylist;
+      const originalId = t.original_id || t.id;
       closeAddToPlaylistModal();
-      await ensureTrackHasYtId(t);
-      downloadSingleTrack(t.id, t.title, t.artist, t.thumbnail);
+
+      // Immediately show progress feedback on the card in Explore or Search
+      updateDownloadProgressUI(originalId, 5, 'downloading', originalId);
+
+      const ytId = await ensureTrackHasYtId(t);
+      if (ytId && ytId !== originalId) {
+        document.querySelectorAll(`[data-dl-btn="${originalId}"]`).forEach(el => {
+          el.setAttribute('data-dl-btn', ytId);
+          el.setAttribute('data-dl-orig', originalId);
+        });
+      }
+
+      downloadSingleTrack(t.id, t.title, t.artist, t.thumbnail, originalId);
       trackPendingAddToPlaylist = null;
     }
 
@@ -1621,8 +1657,16 @@
 
     async function addTrackToSpecificPlaylist(playlistId, track, playlistName) {
       if (!track) return;
+      const originalId = track.original_id || track.id;
       try {
-        await ensureTrackHasYtId(track);
+        updateDownloadProgressUI(originalId, 5, 'downloading', originalId);
+        const ytId = await ensureTrackHasYtId(track);
+        if (ytId && ytId !== originalId) {
+          document.querySelectorAll(`[data-dl-btn="${originalId}"]`).forEach(el => {
+            el.setAttribute('data-dl-btn', ytId);
+            el.setAttribute('data-dl-orig', originalId);
+          });
+        }
         await authFetch(`/api/user-playlists/${playlistId}/tracks`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1637,11 +1681,12 @@
         });
         closeAddToPlaylistModal();
         // Start device IndexedDB download simultaneously
-        downloadSingleTrack(track.id, track.title, track.artist, track.thumbnail);
+        downloadSingleTrack(track.id, track.title, track.artist, track.thumbnail, originalId);
         trackPendingAddToPlaylist = null;
         loadUserPlaylists();
       } catch (e) {
         showToast("Failed to save track to playlist");
+        updateDownloadProgressUI(originalId, 0, 'error', originalId);
       }
     }
 
@@ -2695,21 +2740,25 @@
 
     const activeDownloads = new Set();
 
-    async function downloadSingleTrack(id, title, artist, thumbnail = '') {
+    async function downloadSingleTrack(id, title, artist, thumbnail = '', originalId = null) {
+      if (!originalId && id && (id.startsWith('ext_') || id.length !== 11)) {
+        originalId = id;
+      }
+
       // 1. Check if already in device IndexedDB
-      const existing = await SpotiDB.getTrack(id);
+      const existing = await SpotiDB.getTrack(id) || (originalId ? await SpotiDB.getTrack(originalId) : null);
       if (existing) {
-        updateDownloadProgressUI(id, 100, 'completed');
+        updateDownloadProgressUI(id, 100, 'completed', originalId);
         return;
       }
 
-      if (activeDownloads.has(id)) {
+      if (activeDownloads.has(id) || (originalId && activeDownloads.has(originalId))) {
         return; // Already in-flight
       }
 
       if (!navigator.onLine) {
         showToast('⚠️ Download unavailable while offline.');
-        updateDownloadProgressUI(id, 0, 'error');
+        updateDownloadProgressUI(id, 0, 'error', originalId);
         return;
       }
 
@@ -2718,7 +2767,12 @@
         try {
           const resolvedId = await ensureTrackHasYtId({ id, title, artist });
           if (resolvedId && resolvedId.length === 11) {
+            const prevId = id;
             id = resolvedId;
+            document.querySelectorAll(`[data-dl-btn="${prevId}"]`).forEach(el => {
+              el.setAttribute('data-dl-btn', resolvedId);
+              el.setAttribute('data-dl-orig', prevId);
+            });
           }
         } catch (e) {
           console.warn("Could not resolve external track ID:", e);
@@ -2726,9 +2780,10 @@
       }
 
       activeDownloads.add(id);
+      if (originalId) activeDownloads.add(originalId);
 
       // Show initial circular progress ring immediately on UI
-      updateDownloadProgressUI(id, 5, 'downloading');
+      updateDownloadProgressUI(id, 5, 'downloading', originalId);
 
       try {
         // Convert thumbnail image to base64 data URI in parallel with streaming transfer
@@ -2754,13 +2809,13 @@
           receivedBytes += value.length;
           if (totalBytes > 0) {
             const pct = Math.min(95, Math.max(10, Math.round((receivedBytes / totalBytes) * 90)));
-            updateDownloadProgressUI(id, pct, 'downloading');
+            updateDownloadProgressUI(id, pct, 'downloading', originalId);
           } else {
-            updateDownloadProgressUI(id, 50, 'downloading');
+            updateDownloadProgressUI(id, 50, 'downloading', originalId);
           }
         }
 
-        updateDownloadProgressUI(id, 96, 'downloading');
+        updateDownloadProgressUI(id, 96, 'downloading', originalId);
 
         const contentType = response.headers.get('content-type') || 'audio/mp4';
         const blob = new Blob(chunks, { type: contentType });
@@ -2769,6 +2824,7 @@
         // Save to phone IndexedDB
         const trackRecord = {
           id: id,
+          original_id: originalId || id,
           title: title || (currentTrack && currentTrack.id === id ? currentTrack.title : id),
           artist: artist || (currentTrack && currentTrack.id === id ? currentTrack.artist : 'Unknown Artist'),
           duration: (currentTrack && currentTrack.id === id ? currentTrack.duration : '--:--'),
@@ -2779,28 +2835,40 @@
         };
         await SpotiDB.saveTrack(trackRecord);
         await refreshOfflineTrackIds();
+        if (originalId) {
+          offlineTrackIdSet.add(originalId);
+        }
 
         // Morph ring into completed green checkmark
-        updateDownloadProgressUI(id, 100, 'completed');
+        updateDownloadProgressUI(id, 100, 'completed', originalId);
 
         // If currently playing in drawer, hide the download button immediately
         const drawerDlBtn = document.getElementById('drawer-download-btn');
-        if (drawerDlBtn && currentTrack && currentTrack.id === id) {
+        if (drawerDlBtn && currentTrack && (currentTrack.id === id || currentTrack.id === originalId)) {
           drawerDlBtn.classList.add('hidden');
         }
 
-        // Refresh libraries and playlists
+        // Refresh libraries and playlists in background
         if (typeof loadLibrary === 'function') loadLibrary();
         if (typeof loadUserPlaylists === 'function') loadUserPlaylists();
-        if (activePlaylistId === 'user_pl_offline_downloads') {
-          openPlaylist('user_pl_offline_downloads', true);
+
+        // NO AUTO-NAVIGATION: Keep user on current tab (Explore, Search, etc.)
+        // Only refresh playlist tracks if user is ALREADY looking at Downloaded Songs
+        if (activeTab === 'playlist' && activePlaylistId === 'user_pl_offline_downloads') {
+          const trackList = document.getElementById('playlist-tracks-container');
+          if (trackList && typeof renderPlaylistTracks === 'function') {
+            const offlineTracks = await SpotiDB.getAllTracks();
+            document.getElementById('pl-desc').innerText = `${offlineTracks.length} tracks saved on this device (offline)`;
+            renderPlaylistTracks(offlineTracks, true);
+          }
         }
       } catch (e) {
         console.error("Download error:", e);
-        updateDownloadProgressUI(id, 0, 'error');
+        updateDownloadProgressUI(id, 0, 'error', originalId);
         showToast(`⚠️ Download error: ${e.message || 'Failed'}`);
       } finally {
         activeDownloads.delete(id);
+        if (originalId) activeDownloads.delete(originalId);
       }
     }
 
@@ -2813,7 +2881,7 @@
         if (drawerDlBtn && currentTrack && currentTrack.id === id) {
           drawerDlBtn.classList.remove('hidden');
         }
-        if (activePlaylistId === 'user_pl_offline_downloads') {
+        if (activeTab === 'playlist' && activePlaylistId === 'user_pl_offline_downloads') {
           openPlaylist('user_pl_offline_downloads', true);
         }
         loadLibrary();
