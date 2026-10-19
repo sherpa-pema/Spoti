@@ -189,8 +189,11 @@ def get_playlist(playlist_id: str, user_id: Optional[str] = None) -> Optional[Di
             "is_user_playlist": True,
             "user_id": pl.user,
         }
+    except ClientResponseError as e:
+        if getattr(e, 'status', None) != 404:
+            print(f"PocketBase error fetching playlist {playlist_id}: {e}", file=sys.stderr)
+        return None
     except Exception as e:
-        print(f"Error fetching playlist {playlist_id} from PocketBase: {e}", file=sys.stderr)
         return None
 
 

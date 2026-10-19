@@ -227,15 +227,16 @@ def get_mood_playlists(params: str = Query(...)):
 # -------------------------------------------------------------
 @app.get("/api/playlist/{playlist_id}")
 def get_playlist(playlist_id: str, authorization: Optional[str] = Header(None)):
-    """Fetches full tracks for a playlist (YouTube Music, Shared Offline, or User Custom)."""
+    """Fetches full tracks for a playlist (User Custom / PocketBase, System, or YouTube Music)."""
     user = get_current_user_optional(authorization)
     uid = user["uid"] if user else None
 
-    if playlist_id.startswith("user_pl_"):
-        pl = playlist_manager.get_playlist(playlist_id, uid)
-        if pl:
-            return pl
-        raise HTTPException(status_code=404, detail="Playlist not found")
+    # 1. Check if it's a PocketBase user playlist or system virtual playlist
+    pl = playlist_manager.get_playlist(playlist_id, uid)
+    if pl is not None:
+        return pl
+
+    # 2. Otherwise query YouTube Music
     data = music_api.get_playlist_details(playlist_id)
     return data
 

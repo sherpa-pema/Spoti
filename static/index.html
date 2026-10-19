@@ -175,11 +175,11 @@
           </h2>
           <span class="text-xs text-indigo-400 font-medium cursor-pointer" onclick="loadTrending()">Refresh</span>
         </div>
-        <div id="trending-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5">
-          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
-          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
-          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
-          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+        <div id="trending-container" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
         </div>
       </div>
 
@@ -191,9 +191,11 @@
           </h2>
           <span class="text-xs text-gray-400">Fresh tracks</span>
         </div>
-        <div id="new-releases-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5">
-          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
-          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+        <div id="new-releases-container" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
         </div>
       </div>
 
@@ -205,9 +207,9 @@
           </h2>
           <span class="text-xs text-gray-400">Curated collections</span>
         </div>
-        <div id="featured-playlists-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5">
-          <div class="h-32 rounded-xl bg-white/5 animate-pulse"></div>
-          <div class="h-32 rounded-xl bg-white/5 animate-pulse"></div>
+        <div id="featured-playlists-container" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
         </div>
       </div>
 
@@ -346,14 +348,6 @@
         </div>
       </div>
       <div class="flex items-center gap-1.5" onclick="event.stopPropagation()">
-        <!-- Like / Favorite button on mini player -->
-        <button id="mini-like-btn" onclick="toggleLikeCurrentTrack()" class="p-2 text-gray-400 hover:text-red-400" title="Like Song">
-          <svg id="mini-like-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
-        </button>
-        <!-- Download / Add to Playlist button -->
-        <button id="mini-dl-btn" onclick="promptDownloadTrack(currentTrack)" class="p-2 text-gray-300 hover:text-white" title="Download / Add to Playlist">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-        </button>
         <!-- Play / Pause -->
         <button id="mini-play-btn" onclick="togglePlayPause()" class="w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 flex items-center justify-center text-white shadow-lg shadow-indigo-600/30">
           <svg id="mini-play-icon" class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
@@ -1386,22 +1380,24 @@
 
       if (trendingContainer) {
         trendingContainer.innerHTML = `
-          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
-          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
-          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
-          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
         `;
       }
       if (newReleasesContainer) {
         newReleasesContainer.innerHTML = `
-          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
-          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
         `;
       }
       if (featuredContainer) {
         featuredContainer.innerHTML = `
-          <div class="h-32 rounded-xl bg-white/5 animate-pulse"></div>
-          <div class="h-32 rounded-xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
         `;
       }
 
@@ -1414,24 +1410,22 @@
           trendingContainer.innerHTML = '';
           data.trending.forEach((track) => {
             const card = document.createElement('div');
-            card.className = "glass-card p-2.5 rounded-2xl flex flex-col gap-2 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
+            card.className = "glass-card p-2.5 rounded-2xl flex items-center gap-3 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
             card.onclick = () => playTrackFromList(track, data.trending);
             card.innerHTML = `
-              <div class="relative w-full aspect-square rounded-xl overflow-hidden bg-black/40">
+              <div class="relative w-14 h-14 rounded-xl overflow-hidden bg-black/40 shrink-0 shadow">
                 <img src="${track.thumbnail}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" alt="thumb" loading="lazy">
-                <!-- Play overlay -->
-                <button class="absolute bottom-2 right-2 w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center opacity-90 shadow-lg">
-                  <svg class="w-4 h-4 fill-current ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                </button>
-                <!-- Unified Download Button (Only button) -->
-                <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(track)})" class="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 backdrop-blur-md text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow" title="Download / Add to Playlist">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                </button>
+                <div class="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                  <svg class="w-5 h-5 fill-white ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                </div>
               </div>
-              <div class="min-w-0">
+              <div class="min-w-0 flex-1">
                 <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
                 <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
               </div>
+              <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(track)})" class="w-8 h-8 rounded-full bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0 active:scale-95" title="Download / Add to Playlist">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              </button>
             `;
             trendingContainer.appendChild(card);
           });
@@ -1442,25 +1436,23 @@
           newReleasesContainer.innerHTML = '';
           data.new_releases.forEach((track) => {
             const card = document.createElement('div');
-            card.className = "glass-card p-2.5 rounded-2xl flex flex-col gap-2 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
+            card.className = "glass-card p-2.5 rounded-2xl flex items-center gap-3 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
             card.onclick = () => playTrackFromList(track, data.new_releases);
             card.innerHTML = `
-              <div class="relative w-full aspect-square rounded-xl overflow-hidden bg-black/40">
+              <div class="relative w-14 h-14 rounded-xl overflow-hidden bg-black/40 shrink-0 shadow">
                 <img src="${track.thumbnail}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" alt="thumb" loading="lazy">
-                <span class="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-purple-600/80 backdrop-blur-md text-[10px] font-bold text-white uppercase tracking-wider">New</span>
-                <!-- Play overlay -->
-                <button class="absolute bottom-2 right-2 w-9 h-9 rounded-full bg-purple-600 text-white flex items-center justify-center opacity-90 shadow-lg">
-                  <svg class="w-4 h-4 fill-current ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                </button>
-                <!-- Unified Download Button -->
-                <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(track)})" class="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 backdrop-blur-md text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow" title="Download / Add to Playlist">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                </button>
+                <span class="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-purple-600/90 text-[9px] font-bold text-white uppercase tracking-wider">New</span>
+                <div class="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                  <svg class="w-5 h-5 fill-white ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                </div>
               </div>
-              <div class="min-w-0">
+              <div class="min-w-0 flex-1">
                 <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
                 <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
               </div>
+              <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(track)})" class="w-8 h-8 rounded-full bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0 active:scale-95" title="Download / Add to Playlist">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              </button>
             `;
             newReleasesContainer.appendChild(card);
           });
