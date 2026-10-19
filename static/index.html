@@ -668,6 +668,10 @@
     let userPlaylistsCache = [];
     let trackPendingAddToPlaylist = null;
     let currentUser = null;
+    try {
+      const cachedUser = localStorage.getItem('spoti_user');
+      if (cachedUser) currentUser = JSON.parse(cachedUser);
+    } catch (e) {}
     let userLikedTrackIds = new Set();
     let authMode = 'login';
     let currentBlobUrl = null;
@@ -911,6 +915,12 @@
     }
 
     function getUserPlaylistCacheKey() {
+      if (!currentUser || !currentUser.id) {
+        try {
+          const cached = localStorage.getItem('spoti_user');
+          if (cached) currentUser = JSON.parse(cached);
+        } catch (e) {}
+      }
       return currentUser && currentUser.id ? `spoti_user_pl_cache_${currentUser.id}` : 'spoti_user_pl_cache_guest';
     }
 
@@ -1282,6 +1292,31 @@
         currentUser = { id: data.id, username: data.username };
         localStorage.setItem('spoti_token', data.token);
         localStorage.setItem('spoti_user', JSON.stringify(currentUser));
+
+        // Migrate any local guest playlists created offline to user's account cache
+        try {
+          const rawGuest = localStorage.getItem('spoti_user_pl_cache_guest');
+          if (rawGuest) {
+            const guestPls = JSON.parse(rawGuest) || [];
+            const localGuestPls = guestPls.filter(p => p.id && p.id.startsWith('pl_local_'));
+            if (localGuestPls.length > 0) {
+              const userKey = `spoti_user_pl_cache_${data.id}`;
+              let userPls = [];
+              const rawUser = localStorage.getItem(userKey);
+              if (rawUser) userPls = JSON.parse(rawUser) || [];
+              for (const gp of localGuestPls) {
+                if (!userPls.some(p => p.id === gp.id)) {
+                  userPls.push(gp);
+                }
+              }
+              localStorage.setItem(userKey, JSON.stringify(userPls));
+              localStorage.removeItem('spoti_user_pl_cache_guest');
+            }
+          }
+        } catch (mErr) {
+          console.warn("Guest playlist migration error:", mErr);
+        }
+
         closeAuthModal();
         await initAuth();
         await loadUserPlaylists();
@@ -1407,17 +1442,17 @@
 
       await refreshOfflineTrackIds();
 
+      // Always restore / verify authentication on startup (loads cached spoti_user offline)
+      const loggedIn = await initAuth();
+
       // Check online connectivity
       const isOnline = navigator.onLine;
       if (!isOnline) {
         enterOfflineMode();
       } else {
         migrateOfflineThumbnails();
-        const loggedIn = await initAuth();
         if (!loggedIn && navigator.onLine) {
           openAuthModal('login', true);
-        } else if (!loggedIn && !navigator.onLine) {
-          enterOfflineMode();
         }
         loadTrending();
         loadServerInfo();
@@ -1433,8 +1468,16 @@
       const badge = document.getElementById('offline-badge');
       if (badge) badge.classList.remove('hidden');
 
+      if (!currentUser) {
+        try {
+          const cached = localStorage.getItem('spoti_user');
+          if (cached) currentUser = JSON.parse(cached);
+        } catch(e) {}
+      }
+
       switchTab('library');
-      switchLibrarySubtab('offline');
+      switchLibrarySubtab('playlists');
+      loadUserPlaylists();
       loadLibrary();
       showToast('⚡ Offline Mode: Playing songs downloaded to your phone');
     }
@@ -1475,9 +1518,9 @@
 
     function switchTab(tab) {
       if (tab === 'home' && !navigator.onLine) {
-        showToast('⚡ Explore is unavailable offline. Showing downloaded library.');
+        showToast('⚡ Explore is unavailable offline. Showing your offline library.');
         switchTab('library');
-        switchLibrarySubtab('offline');
+        switchLibrarySubtab('playlists');
         return;
       }
 
@@ -1542,138 +1585,146 @@
       }
     }
 
-    async function loadUserPlaylists() {
+    async function renderUserPlaylistsDOM(playlists) {
       const container = document.getElementById('user-playlists-grid');
-      container.innerHTML = '<div class="col-span-full py-6 text-center text-gray-400 text-sm">Loading playlists...</div>';
+      if (!container) return;
 
-      try {
-        let playlists = [];
-        let fetchSucceeded = false;
+      let list = Array.isArray(playlists) ? [...playlists] : [];
 
-        if (navigator.onLine && localStorage.getItem('spoti_token')) {
-          try {
-            const res = await authFetch('/api/user-playlists');
-            if (res.ok) {
-              const data = await res.json();
-              playlists = data.playlists || [];
-              fetchSucceeded = true;
-              // Preserve any unsynced local-only playlists
-              const localPlaylists = getLocalPlaylists().filter(p => p.id && p.id.startsWith('pl_local_'));
-              for (const lp of localPlaylists) {
-                if (!playlists.some(p => p.id === lp.id)) {
-                  playlists.push(lp);
-                }
-              }
-              saveLocalPlaylists(playlists);
-            }
-          } catch (err) {
-            console.warn("Online playlist fetch failed, will try cache:", err);
-          }
-        }
+      // Always ensure Downloaded Songs virtual playlist exists, even offline
+      if (!list.some(p => p.id === 'user_pl_offline_downloads')) {
+        list.unshift({
+          id: 'user_pl_offline_downloads',
+          title: 'Downloaded Songs',
+          description: 'Songs saved on this device (offline)',
+          is_offline_playlist: true,
+          is_system: true,
+          track_count: 0
+        });
+      }
 
-        if (!fetchSucceeded) {
-          playlists = getLocalPlaylists();
-        }
+      userPlaylistsCache = list;
 
-        // Always ensure Downloaded Songs virtual playlist exists, even offline
-        if (!playlists.some(p => p.id === 'user_pl_offline_downloads')) {
-          playlists.unshift({
-            id: 'user_pl_offline_downloads',
-            title: 'Downloaded Songs',
-            description: 'Songs saved on this device (offline)',
-            is_offline_playlist: true,
-            is_system: true,
-            track_count: 0
-          });
-        }
+      // Custom playlists are user-created non-system playlists
+      const customPlaylists = list.filter(p => p.is_user_playlist && !p.is_system);
+      const plCountEl = document.getElementById('user-pl-count');
+      if (plCountEl) plCountEl.innerText = customPlaylists.length;
 
-        userPlaylistsCache = playlists;
+      container.innerHTML = '';
 
-        // Custom playlists are user-created non-system playlists
-        const customPlaylists = playlists.filter(p => p.is_user_playlist && !p.is_system);
-        const plCountEl = document.getElementById('user-pl-count');
-        if (plCountEl) plCountEl.innerText = customPlaylists.length;
+      const offlineTracks = await SpotiDB.getAllTracks();
+      const offlineCount = offlineTracks.length;
+      const offlineBadgeEl = document.getElementById('offline-songs-count');
+      if (offlineBadgeEl) offlineBadgeEl.innerText = offlineCount;
 
-        container.innerHTML = '';
+      userPlaylistsCache.forEach(pl => {
+        let badgeText = `${pl.track_count || 0} ${pl.track_count === 1 ? 'song' : 'songs'}`;
+        let descText = pl.description || 'Custom Playlist';
+        let thumbMarkup = '';
 
-        const offlineTracks = await SpotiDB.getAllTracks();
-        const offlineCount = offlineTracks.length;
-        const offlineBadgeEl = document.getElementById('offline-songs-count');
-        if (offlineBadgeEl) offlineBadgeEl.innerText = offlineCount;
-
-        userPlaylistsCache.forEach(pl => {
-          let badgeText = `${pl.track_count || 0} ${pl.track_count === 1 ? 'song' : 'songs'}`;
-          let descText = pl.description || 'Custom Playlist';
-          let thumbMarkup = '';
-
-          if (pl.is_offline_playlist) {
-            badgeText = `${offlineCount} on device`;
-            descText = `${offlineCount} songs saved on this device (offline)`;
-            const firstThumb = (offlineTracks.length > 0 && offlineTracks[0].thumbnail) ? offlineTracks[0].thumbnail : '';
-            if (firstThumb) {
-              thumbMarkup = `
-                <img src="${firstThumb}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">
-                <div class="w-full h-full bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white" style="display:none;">
-                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                </div>
-              `;
-            } else {
-              thumbMarkup = `
-                <div class="w-full h-full bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white">
-                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                </div>
-              `;
-            }
-          } else if (pl.is_liked_playlist) {
-            badgeText = `❤️ ${pl.track_count || 0} favorites`;
+        if (pl.is_offline_playlist) {
+          badgeText = `${offlineCount} on device`;
+          descText = `${offlineCount} songs saved on this device (offline)`;
+          const firstThumb = (offlineTracks.length > 0 && offlineTracks[0].thumbnail) ? offlineTracks[0].thumbnail : '';
+          if (firstThumb) {
             thumbMarkup = `
-              ${pl.thumbnail ? `<img src="${pl.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">` : ''}
-              <div class="w-full h-full bg-gradient-to-br from-rose-600 to-pink-600 flex items-center justify-center text-white" style="${pl.thumbnail ? 'display:none;' : ''}">
-                <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+              <img src="${firstThumb}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">
+              <div class="w-full h-full bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white" style="display:none;">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               </div>
             `;
           } else {
-            // Custom user playlist
             thumbMarkup = `
-              ${pl.thumbnail ? `<img src="${pl.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">` : ''}
-              <div class="w-full h-full bg-gradient-to-br from-indigo-600/40 to-purple-600/40 flex items-center justify-center text-indigo-300" style="${pl.thumbnail ? 'display:none;' : ''}">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+              <div class="w-full h-full bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               </div>
             `;
           }
-
-          const card = document.createElement('div');
-          card.className = "glass-card p-2.5 rounded-2xl flex items-center gap-3 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
-          card.onclick = () => openPlaylist(pl.id, true);
-          card.innerHTML = `
-            <div class="relative w-14 h-14 rounded-xl overflow-hidden bg-white/5 shrink-0 shadow flex items-center justify-center">
-              ${thumbMarkup}
+        } else if (pl.is_liked_playlist) {
+          badgeText = `❤️ ${pl.track_count || 0} favorites`;
+          thumbMarkup = `
+            ${pl.thumbnail ? `<img src="${pl.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">` : ''}
+            <div class="w-full h-full bg-gradient-to-br from-rose-600 to-pink-600 flex items-center justify-center text-white" style="${pl.thumbnail ? 'display:none;' : ''}">
+              <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
             </div>
-            <div class="min-w-0 flex-1">
-              <div class="text-sm font-semibold text-white line-clamp-1">${pl.title}</div>
-              <div class="text-xs text-indigo-400 line-clamp-1 mt-0.5">${badgeText}</div>
+          `;
+        } else {
+          // Custom user playlist
+          thumbMarkup = `
+            ${pl.thumbnail ? `<img src="${pl.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">` : ''}
+            <div class="w-full h-full bg-gradient-to-br from-indigo-600/40 to-purple-600/40 flex items-center justify-center text-indigo-300" style="${pl.thumbnail ? 'display:none;' : ''}">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
             </div>
-            <span class="text-xs text-gray-400 p-2">▶</span>
           `;
-          container.appendChild(card);
-        });
-
-        // If no custom playlists exist, display helpful empty state
-        if (customPlaylists.length === 0) {
-          const emptyCard = document.createElement('div');
-          emptyCard.className = "col-span-full py-8 text-center text-gray-500 text-xs";
-          emptyCard.innerHTML = `
-            No custom playlists yet.<br>
-            <button onclick="openCreatePlaylistModal()" class="mt-2.5 text-xs bg-indigo-600/30 hover:bg-indigo-600/40 text-indigo-300 font-medium px-3.5 py-1.5 rounded-xl border border-indigo-500/20">
-              + Create Your First Playlist
-            </button>
-          `;
-          container.appendChild(emptyCard);
         }
 
-      } catch (e) {
-        console.error("loadUserPlaylists error:", e);
-        container.innerHTML = '<div class="col-span-full py-6 text-center text-red-400 text-xs">Failed to load playlists.</div>';
+        const card = document.createElement('div');
+        card.className = "glass-card p-2.5 rounded-2xl flex items-center gap-3 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
+        card.onclick = () => openPlaylist(pl.id, true);
+        card.innerHTML = `
+          <div class="relative w-14 h-14 rounded-xl overflow-hidden bg-white/5 shrink-0 shadow flex items-center justify-center">
+            ${thumbMarkup}
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm font-semibold text-white line-clamp-1">${pl.title}</div>
+            <div class="text-xs text-indigo-400 line-clamp-1 mt-0.5">${badgeText}</div>
+          </div>
+          <span class="text-xs text-gray-400 p-2">▶</span>
+        `;
+        container.appendChild(card);
+      });
+
+      // If no custom playlists exist, display helpful empty state
+      if (customPlaylists.length === 0) {
+        const emptyCard = document.createElement('div');
+        emptyCard.className = "col-span-full py-8 text-center text-gray-500 text-xs";
+        emptyCard.innerHTML = `
+          No custom playlists yet.<br>
+          <button onclick="openCreatePlaylistModal()" class="mt-2.5 text-xs bg-indigo-600/30 hover:bg-indigo-600/40 text-indigo-300 font-medium px-3.5 py-1.5 rounded-xl border border-indigo-500/20">
+            + Create Your First Playlist
+          </button>
+        `;
+        container.appendChild(emptyCard);
+      }
+    }
+
+    async function loadUserPlaylists() {
+      // 1. Instantly render from local cache so there is 0ms delay and no blank screen
+      const cached = getLocalPlaylists();
+      if (cached && cached.length > 0) {
+        await renderUserPlaylistsDOM(cached);
+      } else {
+        const container = document.getElementById('user-playlists-grid');
+        if (container && (!container.children || container.children.length === 0)) {
+          container.innerHTML = '<div class="col-span-full py-6 text-center text-gray-400 text-sm">Loading playlists...</div>';
+        }
+      }
+
+      // 2. Refresh with server playlists if online
+      if (navigator.onLine && localStorage.getItem('spoti_token')) {
+        try {
+          const res = await authFetch('/api/user-playlists');
+          if (res.ok) {
+            const data = await res.json();
+            let playlists = data.playlists || [];
+            // Preserve any unsynced local-only playlists
+            const localPlaylists = getLocalPlaylists().filter(p => p.id && p.id.startsWith('pl_local_'));
+            for (const lp of localPlaylists) {
+              if (!playlists.some(p => p.id === lp.id)) {
+                playlists.push(lp);
+              }
+            }
+            saveLocalPlaylists(playlists);
+            await renderUserPlaylistsDOM(playlists);
+          }
+        } catch (err) {
+          console.warn("Online playlist fetch failed, relying on cache:", err);
+          if (!cached || cached.length === 0) {
+            await renderUserPlaylistsDOM(getLocalPlaylists());
+          }
+        }
+      } else if (!cached || cached.length === 0) {
+        await renderUserPlaylistsDOM(getLocalPlaylists());
       }
     }
 
@@ -1779,13 +1830,17 @@
       closeCreatePlaylistModal();
       showToast(isOfflineCreated ? `✓ Playlist "${createdPl.title}" created (Offline)` : `✓ Playlist "${createdPl.title}" created!`);
 
+      // Immediately navigate to Library tab and Playlists subtab so user sees the new playlist right away
+      switchTab('library');
+      switchLibrarySubtab('playlists');
+
       // If there was a track waiting to be added, add it immediately
       if (trackPendingAddToPlaylist) {
         await addTrackToSpecificPlaylist(createdPl.id, trackPendingAddToPlaylist, createdPl.title);
         trackPendingAddToPlaylist = null;
       }
 
-      loadUserPlaylists();
+      await loadUserPlaylists();
     }
 
     // -------------------------------------------------------------
