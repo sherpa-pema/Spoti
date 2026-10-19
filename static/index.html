@@ -914,6 +914,176 @@
       return currentUser && currentUser.id ? `spoti_user_pl_cache_${currentUser.id}` : 'spoti_user_pl_cache_guest';
     }
 
+    function getLocalPlaylists() {
+      const key = getUserPlaylistCacheKey();
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveLocalPlaylists(playlists) {
+      const key = getUserPlaylistCacheKey();
+      try {
+        localStorage.setItem(key, JSON.stringify(playlists || []));
+      } catch (e) {
+        console.warn("Failed to save local playlists:", e);
+      }
+    }
+
+    function getPlaylistDetailCache(playlistId) {
+      try {
+        const raw = localStorage.getItem('spoti_pl_tracks_' + playlistId);
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function savePlaylistDetailCache(playlistId, tracks) {
+      try {
+        localStorage.setItem('spoti_pl_tracks_' + playlistId, JSON.stringify(tracks || []));
+      } catch (e) {
+        console.warn("Failed to cache playlist tracks:", e);
+      }
+    }
+
+    function getPendingPlaylistOps() {
+      try {
+        const raw = localStorage.getItem('spoti_pending_pl_ops');
+        return raw ? JSON.parse(raw) : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function savePendingPlaylistOps(ops) {
+      try {
+        localStorage.setItem('spoti_pending_pl_ops', JSON.stringify(ops || []));
+      } catch (e) {
+        console.warn("Failed to save pending playlist ops:", e);
+      }
+    }
+
+    function queuePlaylistOp(op) {
+      const ops = getPendingPlaylistOps();
+      ops.push({ ...op, queuedAt: Date.now() });
+      savePendingPlaylistOps(ops);
+    }
+
+    let isSyncingOps = false;
+    async function syncPendingPlaylistOps() {
+      if (isSyncingOps || !navigator.onLine) return;
+      const token = localStorage.getItem('spoti_token');
+      if (!token) return;
+
+      const ops = getPendingPlaylistOps();
+      if (ops.length === 0) return;
+
+      isSyncingOps = true;
+      const remainingOps = [];
+      const idMap = {};
+
+      for (const op of ops) {
+        try {
+          if (op.op === 'create_playlist') {
+            const res = await authFetch('/api/user-playlists', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: op.name, description: op.description || '' })
+            });
+            if (res.ok) {
+              const serverPl = await res.json();
+              idMap[op.localId] = serverPl.id;
+
+              // Remap in local playlists cache
+              let playlists = getLocalPlaylists();
+              let idx = playlists.findIndex(p => p.id === op.localId);
+              if (idx !== -1) {
+                playlists[idx].id = serverPl.id;
+                playlists[idx].is_local = false;
+                saveLocalPlaylists(playlists);
+              }
+
+              // Remap in cached tracks detail
+              const localTracks = getPlaylistDetailCache(op.localId);
+              if (localTracks) {
+                savePlaylistDetailCache(serverPl.id, localTracks);
+                localStorage.removeItem('spoti_pl_tracks_' + op.localId);
+              }
+
+              if (activePlaylistId === op.localId) {
+                activePlaylistId = serverPl.id;
+              }
+            } else {
+              remainingOps.push(op);
+            }
+          } else if (op.op === 'add_track') {
+            const targetPlId = idMap[op.playlistId] || op.playlistId;
+            if (targetPlId.startsWith('pl_local_')) {
+              remainingOps.push({ ...op, playlistId: targetPlId });
+            } else {
+              const res = await authFetch(`/api/user-playlists/${targetPlId}/tracks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  id: op.track.id,
+                  title: op.track.title,
+                  artist: op.track.artist,
+                  duration: op.track.duration || '',
+                  thumbnail: op.track.thumbnail || '',
+                  album: op.track.album || ''
+                })
+              });
+              if (!res.ok) {
+                remainingOps.push({ ...op, playlistId: targetPlId });
+              }
+            }
+          } else if (op.op === 'remove_track') {
+            const targetPlId = idMap[op.playlistId] || op.playlistId;
+            if (!targetPlId.startsWith('pl_local_')) {
+              const res = await authFetch(`/api/user-playlists/${targetPlId}/tracks/${op.trackId}`, {
+                method: 'DELETE'
+              });
+              if (!res.ok && res.status !== 404) {
+                remainingOps.push({ ...op, playlistId: targetPlId });
+              }
+            }
+          } else if (op.op === 'delete_playlist') {
+            const targetPlId = idMap[op.playlistId] || op.playlistId;
+            if (!targetPlId.startsWith('pl_local_')) {
+              const res = await authFetch(`/api/user-playlists/${targetPlId}`, {
+                method: 'DELETE'
+              });
+              if (!res.ok && res.status !== 404) {
+                remainingOps.push({ ...op, playlistId: targetPlId });
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("[Sync] Error syncing op:", op, err);
+          if (op.playlistId && idMap[op.playlistId]) {
+            op.playlistId = idMap[op.playlistId];
+          }
+          remainingOps.push(op);
+          break;
+        }
+      }
+
+      savePendingPlaylistOps(remainingOps);
+      isSyncingOps = false;
+
+      if (remainingOps.length < ops.length) {
+        loadUserPlaylists();
+      }
+    }
+
+    window.addEventListener('online', () => {
+      syncPendingPlaylistOps();
+    });
+
     async function initAuth() {
       const token = localStorage.getItem('spoti_token');
       const nameDisplay = document.getElementById('user-name-display');
@@ -1380,16 +1550,21 @@
         let playlists = [];
         let fetchSucceeded = false;
 
-        if (navigator.onLine) {
+        if (navigator.onLine && localStorage.getItem('spoti_token')) {
           try {
             const res = await authFetch('/api/user-playlists');
             if (res.ok) {
               const data = await res.json();
               playlists = data.playlists || [];
               fetchSucceeded = true;
-              try {
-                localStorage.setItem(getUserPlaylistCacheKey(), JSON.stringify(playlists));
-              } catch (e) {}
+              // Preserve any unsynced local-only playlists
+              const localPlaylists = getLocalPlaylists().filter(p => p.id && p.id.startsWith('pl_local_'));
+              for (const lp of localPlaylists) {
+                if (!playlists.some(p => p.id === lp.id)) {
+                  playlists.push(lp);
+                }
+              }
+              saveLocalPlaylists(playlists);
             }
           } catch (err) {
             console.warn("Online playlist fetch failed, will try cache:", err);
@@ -1397,10 +1572,7 @@
         }
 
         if (!fetchSucceeded) {
-          const cached = localStorage.getItem(getUserPlaylistCacheKey());
-          if (cached) {
-            try { playlists = JSON.parse(cached); } catch (e) {}
-          }
+          playlists = getLocalPlaylists();
         }
 
         // Always ensure Downloaded Songs virtual playlist exists, even offline
@@ -1491,7 +1663,7 @@
           const emptyCard = document.createElement('div');
           emptyCard.className = "col-span-full py-8 text-center text-gray-500 text-xs";
           emptyCard.innerHTML = `
-            ${currentUser ? 'No custom playlists yet.' : 'Log in to create personal playlists & save favorites.'}<br>
+            No custom playlists yet.<br>
             <button onclick="openCreatePlaylistModal()" class="mt-2.5 text-xs bg-indigo-600/30 hover:bg-indigo-600/40 text-indigo-300 font-medium px-3.5 py-1.5 rounded-xl border border-indigo-500/20">
               + Create Your First Playlist
             </button>
@@ -1508,9 +1680,18 @@
     // Modal: Create Playlist
     function openCreatePlaylistModal(fromAddModal = false) {
       if (!currentUser) {
+        const cachedUser = localStorage.getItem('spoti_user');
+        if (cachedUser) {
+          try { currentUser = JSON.parse(cachedUser); } catch (e) {}
+        }
+      }
+      if (!currentUser && navigator.onLine) {
         showToast("Please log in to create custom playlists");
         openAuthModal('login');
         return;
+      }
+      if (!currentUser) {
+        currentUser = { id: 'guest', username: 'Guest' };
       }
       if (fromAddModal) closeAddToPlaylistModal();
       document.getElementById('new-pl-name').value = '';
@@ -1525,9 +1706,11 @@
 
     async function submitCreatePlaylist() {
       if (!currentUser) {
-        showToast("Please log in to create playlists");
-        openAuthModal('login');
-        return;
+        const cachedUser = localStorage.getItem('spoti_user');
+        if (cachedUser) {
+          try { currentUser = JSON.parse(cachedUser); } catch (e) {}
+        }
+        if (!currentUser) currentUser = { id: 'guest', username: 'Guest' };
       }
       const name = document.getElementById('new-pl-name').value.trim();
       const desc = document.getElementById('new-pl-desc').value.trim();
@@ -1536,26 +1719,73 @@
         return;
       }
 
-      try {
-        const res = await authFetch('/api/user-playlists', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: name, description: desc })
-        });
-        const createdPl = await res.json();
-        closeCreatePlaylistModal();
-        showToast(`✓ Playlist "${createdPl.title}" created!`);
+      let createdPl = null;
+      let isOfflineCreated = false;
 
-        // If there was a track waiting to be added, add it immediately
-        if (trackPendingAddToPlaylist) {
-          await addTrackToSpecificPlaylist(createdPl.id, trackPendingAddToPlaylist, createdPl.title);
-          trackPendingAddToPlaylist = null;
+      if (navigator.onLine && localStorage.getItem('spoti_token')) {
+        try {
+          const res = await authFetch('/api/user-playlists', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name, description: desc })
+          });
+          if (res.ok) {
+            createdPl = await res.json();
+          } else {
+            isOfflineCreated = true;
+          }
+        } catch (e) {
+          console.warn("Online playlist creation failed, creating locally:", e);
+          isOfflineCreated = true;
         }
-
-        loadUserPlaylists();
-      } catch (e) {
-        showToast("Failed to create playlist");
+      } else {
+        isOfflineCreated = true;
       }
+
+      if (isOfflineCreated || !createdPl) {
+        const localId = 'pl_local_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+        createdPl = {
+          id: localId,
+          title: name,
+          description: desc,
+          is_user_playlist: true,
+          is_local: true,
+          track_count: 0,
+          thumbnail: '',
+          tracks: []
+        };
+        const playlists = getLocalPlaylists();
+        playlists.push(createdPl);
+        saveLocalPlaylists(playlists);
+        savePlaylistDetailCache(localId, []);
+        queuePlaylistOp({
+          op: 'create_playlist',
+          localId: localId,
+          name: name,
+          description: desc
+        });
+      } else {
+        const playlists = getLocalPlaylists();
+        const existingIdx = playlists.findIndex(p => p.id === createdPl.id);
+        if (existingIdx >= 0) {
+          playlists[existingIdx] = createdPl;
+        } else {
+          playlists.push(createdPl);
+        }
+        saveLocalPlaylists(playlists);
+        savePlaylistDetailCache(createdPl.id, createdPl.tracks || []);
+      }
+
+      closeCreatePlaylistModal();
+      showToast(isOfflineCreated ? `✓ Playlist "${createdPl.title}" created (Offline)` : `✓ Playlist "${createdPl.title}" created!`);
+
+      // If there was a track waiting to be added, add it immediately
+      if (trackPendingAddToPlaylist) {
+        await addTrackToSpecificPlaylist(createdPl.id, trackPendingAddToPlaylist, createdPl.title);
+        trackPendingAddToPlaylist = null;
+      }
+
+      loadUserPlaylists();
     }
 
     // -------------------------------------------------------------
@@ -1577,6 +1807,9 @@
 
     async function ensureTrackHasYtId(track) {
       if (track.id && track.id.length === 11 && !track.id.startsWith('ext_')) {
+        return track.id;
+      }
+      if (!navigator.onLine) {
         return track.id;
       }
       try {
@@ -1621,38 +1854,62 @@
       const container = document.getElementById('add-modal-playlists-list');
       container.innerHTML = '<div class="text-center py-4 text-gray-400 text-xs">Loading playlists...</div>';
 
-      try {
-        const res = await authFetch('/api/user-playlists');
-        const data = await res.json();
-        userPlaylistsCache = data.playlists || [];
-        const customPlaylists = userPlaylistsCache.filter(pl => pl.is_user_playlist && !pl.is_system);
-        container.innerHTML = '';
-
-        if (customPlaylists.length === 0) {
-          container.innerHTML = '<div class="text-center py-3 text-gray-500 text-xs">No custom playlists yet. Use "Create New Playlist" above!</div>';
-          return;
+      let playlists = [];
+      if (navigator.onLine && localStorage.getItem('spoti_token')) {
+        try {
+          const res = await authFetch('/api/user-playlists');
+          if (res.ok) {
+            const data = await res.json();
+            playlists = data.playlists || [];
+            userPlaylistsCache = playlists;
+            // Preserve unsynced local playlists
+            const localPlaylists = getLocalPlaylists().filter(p => p.id && p.id.startsWith('pl_local_'));
+            for (const lp of localPlaylists) {
+              if (!playlists.some(p => p.id === lp.id)) {
+                playlists.push(lp);
+              }
+            }
+            saveLocalPlaylists(playlists);
+          } else {
+            playlists = getLocalPlaylists();
+          }
+        } catch (e) {
+          playlists = getLocalPlaylists();
         }
-
-        customPlaylists.forEach(pl => {
-          const row = document.createElement('div');
-          row.className = "flex items-center gap-3 p-2 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer";
-          row.onclick = () => addTrackToSpecificPlaylist(pl.id, trackPendingAddToPlaylist, pl.title);
-          row.innerHTML = `
-            <img src="${pl.thumbnail}" class="w-10 h-10 rounded-lg object-cover" alt="pl">
-            <div class="min-w-0 flex-1">
-              <div class="text-xs font-semibold text-white line-clamp-1">${pl.title}</div>
-              <div class="text-[11px] text-gray-400">${pl.track_count} songs</div>
-            </div>
-            <span class="text-xs text-indigo-400 font-medium px-2 py-1 bg-white/5 rounded-lg flex items-center gap-1">
-              <span>⬇️</span> Save
-            </span>
-          `;
-          container.appendChild(row);
-        });
-
-      } catch (e) {
-        container.innerHTML = '<div class="text-center py-4 text-red-400 text-xs">Failed to load playlists</div>';
+      } else {
+        playlists = getLocalPlaylists();
       }
+
+      userPlaylistsCache = playlists;
+      const customPlaylists = playlists.filter(pl => pl.is_user_playlist && !pl.is_system);
+      container.innerHTML = '';
+
+      if (customPlaylists.length === 0) {
+        container.innerHTML = '<div class="text-center py-3 text-gray-500 text-xs">No custom playlists yet. Use "+ Create New Playlist" above!</div>';
+        return;
+      }
+
+      customPlaylists.forEach(pl => {
+        const row = document.createElement('div');
+        row.className = "flex items-center gap-3 p-2 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer";
+        row.onclick = () => addTrackToSpecificPlaylist(pl.id, trackPendingAddToPlaylist, pl.title);
+        row.innerHTML = `
+          <div class="relative w-10 h-10 rounded-lg overflow-hidden bg-white/5 shrink-0 flex items-center justify-center">
+            ${pl.thumbnail ? `<img src="${pl.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">` : ''}
+            <div class="w-full h-full bg-gradient-to-br from-indigo-600/40 to-purple-600/40 flex items-center justify-center text-indigo-300" style="${pl.thumbnail ? 'display:none;' : ''}">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+            </div>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="text-xs font-semibold text-white line-clamp-1">${pl.title}</div>
+            <div class="text-[11px] text-gray-400">${pl.track_count || 0} songs</div>
+          </div>
+          <span class="text-xs text-indigo-400 font-medium px-2 py-1 bg-white/5 rounded-lg flex items-center gap-1">
+            <span>⬇️</span> Save
+          </span>
+        `;
+        container.appendChild(row);
+      });
     }
 
     async function addTrackToSpecificPlaylist(playlistId, track, playlistName) {
@@ -1667,24 +1924,68 @@
             el.setAttribute('data-dl-orig', originalId);
           });
         }
-        await authFetch(`/api/user-playlists/${playlistId}/tracks`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+
+        // 1. Update local cache immediately
+        let cachedTracks = getPlaylistDetailCache(playlistId) || [];
+        if (!cachedTracks.some(t => t.id === track.id)) {
+          cachedTracks.push({
             id: track.id,
             title: track.title,
             artist: track.artist,
-            duration: track.duration,
-            thumbnail: track.thumbnail,
-            album: track.album || ""
-          })
-        });
+            duration: track.duration || '',
+            thumbnail: track.thumbnail || '',
+            album: track.album || ''
+          });
+          savePlaylistDetailCache(playlistId, cachedTracks);
+        }
+
+        // Update playlist meta (track count and thumbnail)
+        let playlists = getLocalPlaylists();
+        const plIdx = playlists.findIndex(p => p.id === playlistId);
+        if (plIdx !== -1) {
+          playlists[plIdx].track_count = cachedTracks.length;
+          if (!playlists[plIdx].thumbnail && track.thumbnail) {
+            playlists[plIdx].thumbnail = track.thumbnail;
+          }
+          saveLocalPlaylists(playlists);
+        }
+
         closeAddToPlaylistModal();
-        // Start device IndexedDB download simultaneously
+
+        // 2. Sync to PocketBase server or queue for sync
+        if (navigator.onLine && !playlistId.startsWith('pl_local_') && localStorage.getItem('spoti_token')) {
+          try {
+            await authFetch(`/api/user-playlists/${playlistId}/tracks`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: track.id,
+                title: track.title,
+                artist: track.artist,
+                duration: track.duration || '',
+                thumbnail: track.thumbnail || '',
+                album: track.album || ''
+              })
+            });
+          } catch (netErr) {
+            console.warn("Network error adding track to server, queued:", netErr);
+            queuePlaylistOp({ op: 'add_track', playlistId: playlistId, track: track });
+          }
+        } else {
+          queuePlaylistOp({ op: 'add_track', playlistId: playlistId, track: track });
+        }
+
+        // 3. Start device IndexedDB download simultaneously if not downloaded
         downloadSingleTrack(track.id, track.title, track.artist, track.thumbnail, originalId);
         trackPendingAddToPlaylist = null;
+        showToast(`✓ Added to ${playlistName}${navigator.onLine ? '' : ' (Offline)'}`);
+
+        if (activePlaylistId === playlistId) {
+          openPlaylist(playlistId, true);
+        }
         loadUserPlaylists();
       } catch (e) {
+        console.error("addTrackToSpecificPlaylist error:", e);
         showToast("Failed to save track to playlist");
         updateDownloadProgressUI(originalId, 0, 'error', originalId);
       }
@@ -1693,13 +1994,39 @@
     async function removeTrackFromCustomPlaylist(playlistId, trackId, event) {
       if (event) event.stopPropagation();
       try {
-        const res = await authFetch(`/api/user-playlists/${playlistId}/tracks/${trackId}`, { method: 'DELETE' });
-        if (res.ok) {
-          showToast("Track removed from playlist");
-          openPlaylist(playlistId, true);
-        } else {
-          showToast("Failed to remove track");
+        // 1. Update local cache immediately
+        let cachedTracks = getPlaylistDetailCache(playlistId) || [];
+        cachedTracks = cachedTracks.filter(t => t.id !== trackId);
+        savePlaylistDetailCache(playlistId, cachedTracks);
+
+        let playlists = getLocalPlaylists();
+        const plIdx = playlists.findIndex(p => p.id === playlistId);
+        if (plIdx !== -1) {
+          playlists[plIdx].track_count = cachedTracks.length;
+          if (cachedTracks.length > 0 && cachedTracks[0].thumbnail) {
+            playlists[plIdx].thumbnail = cachedTracks[0].thumbnail;
+          }
+          saveLocalPlaylists(playlists);
         }
+
+        // 2. Handle sync
+        if (playlistId.startsWith('pl_local_')) {
+          let ops = getPendingPlaylistOps();
+          ops = ops.filter(op => !(op.op === 'add_track' && op.playlistId === playlistId && op.track && op.track.id === trackId));
+          savePendingPlaylistOps(ops);
+        } else if (navigator.onLine && localStorage.getItem('spoti_token')) {
+          try {
+            await authFetch(`/api/user-playlists/${playlistId}/tracks/${trackId}`, { method: 'DELETE' });
+          } catch (netErr) {
+            queuePlaylistOp({ op: 'remove_track', playlistId: playlistId, trackId: trackId });
+          }
+        } else {
+          queuePlaylistOp({ op: 'remove_track', playlistId: playlistId, trackId: trackId });
+        }
+
+        showToast("Track removed from playlist");
+        openPlaylist(playlistId, true);
+        loadUserPlaylists();
       } catch (e) {
         showToast("Failed to remove track");
       }
@@ -1709,15 +2036,33 @@
       if (!activePlaylistId || !confirm("Are you sure you want to delete this playlist?")) return;
       try {
         const deletedId = activePlaylistId;
-        const res = await authFetch(`/api/user-playlists/${deletedId}`, { method: 'DELETE' });
-        if (!res.ok) {
-          showToast("Failed to delete playlist");
-          return;
+
+        // 1. Update local cache immediately
+        let playlists = getLocalPlaylists();
+        playlists = playlists.filter(p => p.id !== deletedId);
+        saveLocalPlaylists(playlists);
+        localStorage.removeItem('spoti_pl_tracks_' + deletedId);
+
+        // 2. Handle sync
+        if (deletedId.startsWith('pl_local_')) {
+          let ops = getPendingPlaylistOps();
+          ops = ops.filter(op => !(op.localId === deletedId || op.playlistId === deletedId));
+          savePendingPlaylistOps(ops);
+        } else if (navigator.onLine && localStorage.getItem('spoti_token')) {
+          try {
+            await authFetch(`/api/user-playlists/${deletedId}`, { method: 'DELETE' });
+          } catch (netErr) {
+            queuePlaylistOp({ op: 'delete_playlist', playlistId: deletedId });
+          }
+        } else {
+          queuePlaylistOp({ op: 'delete_playlist', playlistId: deletedId });
         }
+
         showToast("Playlist deleted");
         activePlaylistId = null;
         activePlaylistIsUser = false;
         switchTab('library');
+        loadUserPlaylists();
       } catch (e) {
         console.error("Error deleting playlist:", e);
         showToast("Failed to delete playlist");
@@ -2268,7 +2613,16 @@
         const offlineTracks = await SpotiDB.getAllTracks();
         document.getElementById('pl-title').innerText = "Downloaded Songs";
         document.getElementById('pl-desc').innerText = `${offlineTracks.length} tracks saved on this device (offline)`;
-        document.getElementById('pl-cover').src = (offlineTracks.length > 0 && offlineTracks[0].thumbnail) ? offlineTracks[0].thumbnail : "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80";
+        const coverEl = document.getElementById('pl-cover');
+        const firstThumb = (offlineTracks.length > 0 && offlineTracks[0].thumbnail) ? offlineTracks[0].thumbnail : '';
+        if (firstThumb) {
+          coverEl.src = firstThumb;
+          coverEl.style.display = 'block';
+          if (coverEl.nextElementSibling) coverEl.nextElementSibling.style.display = 'none';
+        } else {
+          coverEl.style.display = 'none';
+          if (coverEl.nextElementSibling) coverEl.nextElementSibling.style.display = 'flex';
+        }
 
         trackList.innerHTML = '';
         if (offlineTracks.length === 0) {
@@ -2293,7 +2647,11 @@
               <div class="text-xs text-gray-400 line-clamp-1">${t.artist} • ${t.sizeFormatted || 'Offline'}</div>
             </div>
             <div class="flex items-center gap-1">
-              <!-- Delete from Device (Only action needed since already downloaded) -->
+              <!-- Add to Playlist -->
+              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(t)})" class="p-2 text-indigo-400 hover:text-indigo-300 active:scale-95 transition" title="Add to Playlist">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              </button>
+              <!-- Delete from Device -->
               <button onclick="event.stopPropagation(); deleteOfflineTrack('${t.id}', '${escapeQuotes(t.title)}')" class="p-2 text-red-400 hover:text-red-300 active:scale-95 transition" title="Delete from Device">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
               </button>
@@ -2304,67 +2662,101 @@
         return;
       }
 
-      try {
-        const res = await authFetch(`/api/playlist/${playlistId}`);
-        const data = await res.json();
-        document.getElementById('pl-title').innerText = data.title;
-        document.getElementById('pl-desc').innerText = data.description || `${data.tracks.length} tracks`;
-        document.getElementById('pl-cover').src = data.thumbnail;
+      let data = null;
+      let loadFromCache = false;
 
-        trackList.innerHTML = '';
-        if (data.tracks.length === 0) {
-          trackList.innerHTML = '<div class="text-center py-12 text-gray-500 text-xs">This playlist is empty. Add songs to it from Explore or Search!</div>';
-          return;
+      if (playlistId.startsWith('pl_local_') || !navigator.onLine) {
+        loadFromCache = true;
+      } else {
+        try {
+          const res = await authFetch(`/api/playlist/${playlistId}`);
+          if (res.ok) {
+            data = await res.json();
+            savePlaylistDetailCache(playlistId, data.tracks || []);
+          } else {
+            loadFromCache = true;
+          }
+        } catch (e) {
+          console.warn("Failed to fetch playlist online, falling back to cache:", e);
+          loadFromCache = true;
+        }
+      }
+
+      if (loadFromCache) {
+        const localPlaylists = getLocalPlaylists();
+        const plMeta = localPlaylists.find(p => p.id === playlistId);
+        const cachedTracks = getPlaylistDetailCache(playlistId) || (plMeta && plMeta.tracks) || [];
+        data = {
+          id: playlistId,
+          title: plMeta ? plMeta.title : 'Playlist',
+          description: plMeta ? plMeta.description : `${cachedTracks.length} tracks (Offline)`,
+          thumbnail: (cachedTracks.length > 0 && cachedTracks[0].thumbnail) ? cachedTracks[0].thumbnail : (plMeta && plMeta.thumbnail) ? plMeta.thumbnail : '',
+          tracks: cachedTracks
+        };
+      }
+
+      document.getElementById('pl-title').innerText = data.title;
+      document.getElementById('pl-desc').innerText = data.description || `${data.tracks.length} tracks`;
+      const coverEl = document.getElementById('pl-cover');
+      if (data.thumbnail) {
+        coverEl.src = data.thumbnail;
+        coverEl.style.display = 'block';
+        if (coverEl.nextElementSibling) coverEl.nextElementSibling.style.display = 'none';
+      } else {
+        coverEl.style.display = 'none';
+        if (coverEl.nextElementSibling) coverEl.nextElementSibling.style.display = 'flex';
+      }
+
+      trackList.innerHTML = '';
+      if (!data.tracks || data.tracks.length === 0) {
+        trackList.innerHTML = '<div class="text-center py-12 text-gray-500 text-xs">This playlist is empty. Add songs to it from Downloaded Songs, Explore or Search!</div>';
+        return;
+      }
+
+      data.tracks.forEach((t, i) => {
+        const isDownloaded = offlineTrackIdSet.has(t.id);
+        const isLiked = userLikedTrackIds.has(t.id);
+        const row = document.createElement('div');
+        row.className = "glass-card p-2.5 rounded-xl flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer";
+        row.onclick = () => playTrackFromList(t, data.tracks);
+
+        let actionButtonsHtml = '';
+        if (isUserPlaylist) {
+          // User custom playlist: if downloaded show "On Phone" badge, otherwise offer download button
+          actionButtonsHtml = `
+            ${isDownloaded ? '<span class="text-xs text-emerald-400 font-medium px-2 py-0.5 bg-emerald-500/10 rounded-md">On Phone</span>' : renderDownloadBtnHtml(t)}
+            <button onclick="event.stopPropagation(); removeTrackFromCustomPlaylist('${playlistId}', '${t.id}', event)" class="p-2 text-red-400 hover:text-red-300 active:scale-95 transition" title="Remove from Playlist">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+          `;
+        } else {
+          // System / Explore playlist: show like and download
+          actionButtonsHtml = `
+            <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(t)}, event)" class="p-1.5 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
+              <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+            </button>
+            ${renderDownloadBtnHtml(t)}
+          `;
         }
 
-        data.tracks.forEach((t, i) => {
-          const isDownloaded = offlineTrackIdSet.has(t.id);
-          const isLiked = userLikedTrackIds.has(t.id);
-          const row = document.createElement('div');
-          row.className = "glass-card p-2.5 rounded-xl flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer";
-          row.onclick = () => playTrackFromList(t, data.tracks);
-
-          let actionButtonsHtml = '';
-          if (isUserPlaylist) {
-            // User custom playlist: if downloaded show "On Phone" badge, otherwise offer download button
-            actionButtonsHtml = `
-              ${isDownloaded ? '<span class="text-xs text-emerald-400 font-medium px-2 py-0.5 bg-emerald-500/10 rounded-md">On Phone</span>' : renderDownloadBtnHtml(t)}
-              <button onclick="event.stopPropagation(); removeTrackFromCustomPlaylist('${playlistId}', '${t.id}', event)" class="p-2 text-red-400 hover:text-red-300 active:scale-95 transition" title="Remove from Playlist">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-              </button>
-            `;
-          } else {
-            // System / Explore playlist: show like and download (or saved checkmark)
-            actionButtonsHtml = `
-              <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(t)}, event)" class="p-1.5 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
-                <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
-              </button>
-              ${renderDownloadBtnHtml(t)}
-            `;
-          }
-
-          row.innerHTML = `
-            <span class="text-xs font-mono text-gray-500 w-4">${i + 1}</span>
-            <div class="relative w-10 h-10 rounded-lg overflow-hidden bg-white/5 shrink-0 flex items-center justify-center">
-              ${t.thumbnail ? `<img src="${t.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="art">` : ''}
-              <div class="w-full h-full bg-gradient-to-br from-indigo-600/30 to-purple-600/30 flex items-center justify-center text-indigo-300" style="${t.thumbnail ? 'display:none;' : ''}">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
-              </div>
+        row.innerHTML = `
+          <span class="text-xs font-mono text-gray-500 w-4">${i + 1}</span>
+          <div class="relative w-10 h-10 rounded-lg overflow-hidden bg-white/5 shrink-0 flex items-center justify-center">
+            ${t.thumbnail ? `<img src="${t.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="art">` : ''}
+            <div class="w-full h-full bg-gradient-to-br from-indigo-600/30 to-purple-600/30 flex items-center justify-center text-indigo-300" style="${t.thumbnail ? 'display:none;' : ''}">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
             </div>
-            <div class="min-w-0 flex-1">
-              <div class="text-sm font-semibold text-white line-clamp-1">${t.title}</div>
-              <div class="text-xs text-gray-400 line-clamp-1">${t.artist}</div>
-            </div>
-            <div class="flex items-center gap-1.5">
-              ${actionButtonsHtml}
-            </div>
-          `;
-          trackList.appendChild(row);
-        });
-
-      } catch (e) {
-        trackList.innerHTML = '<div class="text-center py-10 text-red-400 text-sm">Failed to load playlist tracks.</div>';
-      }
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm font-semibold text-white line-clamp-1">${t.title}</div>
+            <div class="text-xs text-gray-400 line-clamp-1">${t.artist || 'Unknown'}</div>
+          </div>
+          <div class="flex items-center gap-1.5">
+            ${actionButtonsHtml}
+          </div>
+        `;
+        trackList.appendChild(row);
+      });
     }
 
     async function playEntirePlaylist() {
@@ -2376,10 +2768,29 @@
           }
           return;
         }
-        const res = await authFetch(`/api/playlist/${activePlaylistId}`);
-        const data = await res.json();
-        if (data.tracks && data.tracks.length > 0) {
-          playTrackFromList(data.tracks[0], data.tracks);
+
+        let tracks = [];
+        if (activePlaylistId && (activePlaylistId.startsWith('pl_local_') || !navigator.onLine)) {
+          const cached = getPlaylistDetailCache(activePlaylistId);
+          if (cached) tracks = cached;
+        }
+
+        if (tracks.length === 0) {
+          try {
+            const res = await authFetch(`/api/playlist/${activePlaylistId}`);
+            if (res.ok) {
+              const data = await res.json();
+              tracks = data.tracks || [];
+            }
+          } catch (netErr) {
+            tracks = getPlaylistDetailCache(activePlaylistId) || [];
+          }
+        }
+
+        if (tracks.length > 0) {
+          playTrackFromList(tracks[0], tracks);
+        } else {
+          showToast("Playlist is empty");
         }
       } catch (e) {
         showToast("Failed to play playlist");
@@ -2395,9 +2806,14 @@
           btn.innerText = '⬇️ Download All';
           return;
         }
-        const res = await authFetch(`/api/playlist/${activePlaylistId}`);
-        const data = await res.json();
-        const tracks = data.tracks || [];
+        let tracks = [];
+        if (activePlaylistId && (activePlaylistId.startsWith('pl_local_') || !navigator.onLine)) {
+          tracks = getPlaylistDetailCache(activePlaylistId) || [];
+        } else {
+          const res = await authFetch(`/api/playlist/${activePlaylistId}`);
+          const data = await res.json();
+          tracks = data.tracks || [];
+        }
         let count = 0;
         for (const t of tracks) {
           const exists = await SpotiDB.getTrack(t.id);
@@ -2453,8 +2869,12 @@
               <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
               <div class="text-xs text-gray-400 line-clamp-1">${track.artist} • ${track.sizeFormatted || 'Offline'}</div>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-1.5">
               <span class="text-xs text-emerald-400 font-medium px-2 py-0.5 bg-emerald-500/10 rounded-md">On Phone</span>
+              <!-- Add to Playlist -->
+              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(track)})" class="p-2 text-indigo-400 hover:text-indigo-300 active:scale-95 transition" title="Add to Playlist">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              </button>
               <!-- Delete from Device -->
               <button onclick="event.stopPropagation(); deleteOfflineTrack('${track.id}', '${escapeQuotes(track.title)}')" class="p-2 text-red-400 hover:text-red-300 active:scale-95 transition" title="Delete from Device">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
