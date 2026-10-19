@@ -42,6 +42,11 @@ try:
 except ImportError:
     billboard = None
 
+try:
+    from ytmusicapi import YTMusic
+except ImportError:
+    YTMusic = None
+
 PB_URL = os.environ.get("PB_URL", "http://192.168.1.67:8090")
 SUPERUSER_EMAIL = os.environ.get("PB_SUPERUSER_EMAIL", "camy.labs.np@gmail.com")
 SUPERUSER_PASS = os.environ.get("PB_SUPERUSER_PASS", "Dun21c@n")
@@ -397,46 +402,92 @@ def fetch_new_releases() -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Section D: Genres (Deezer Genres & Tops)
+# Section D: Genres (YouTube Music API Genres & Tops)
 # ---------------------------------------------------------------------------
 def fetch_genres() -> List[Dict[str, Any]]:
-    print("Fetching Genres & Curated Tops from Deezer...")
+    print("Fetching Genres & Curated Tops from YouTube Music API...")
     genres_list: List[Dict[str, Any]] = []
 
-    res = fetch_json("https://api.deezer.com/genre")
-    if not res or "data" not in res:
-        print("Warning: Deezer genres API unavailable")
-        return []
+    if YTMusic:
+        try:
+            from ytmusicapi.navigation import nav, SINGLE_COLUMN_TAB, SECTION_LIST
+            ytm = YTMusic()
+            categories = ytm.get_mood_categories()
+            all_genres = categories.get("Genres", [])
 
-    raw_genres = [g for g in res.get("data", []) if g.get("id") != 0]
+            # High-priority globally popular genres
+            priority_names = [
+                "Pop", "Hip-hop", "Rock", "Dance & electronic", "Indie & alternative",
+                "R&B & soul", "K-Pop", "Latin", "Country & Americana", "Metal",
+                "Jazz", "African", "Classical", "Folk & acoustic", "Reggae & caribbean",
+                "Hindi", "J-Pop", "Decades", "Desi hip-hop", "Family"
+            ]
+            selected = [g for g in all_genres if g.get("title") in priority_names]
+            for g in all_genres:
+                if len(selected) >= 20:
+                    break
+                if g not in selected:
+                    selected.append(g)
 
-    for g in raw_genres:
-        gid = g.get("id")
-        gname = g.get("name")
-        pic = g.get("picture_medium") or g.get("picture") or ""
+            for idx, g in enumerate(selected, start=1):
+                gtitle = g.get("title", f"Genre {idx}")
+                gparams = g.get("params", "")
+                tracks = []
+                if gparams:
+                    try:
+                        res = ytm._send_request("browse", {"browseId": "FEmusic_moods_and_genres_category", "params": gparams})
+                        sections = nav(res, SINGLE_COLUMN_TAB + SECTION_LIST)
+                        for s in sections:
+                            for container_key in ["musicCarouselShelfRenderer", "musicShelfRenderer"]:
+                                if container_key in s:
+                                    for c in s[container_key].get("contents", []):
+                                        if "musicResponsiveListItemRenderer" in c:
+                                            r = c["musicResponsiveListItemRenderer"]
+                                            try:
+                                                title = r["flexColumns"][0]["musicResponsiveListItemFlexColumnRenderer"]["text"]["runs"][0]["text"]
+                                                artist = r["flexColumns"][1]["musicResponsiveListItemFlexColumnRenderer"]["text"]["runs"][0]["text"]
+                                                vid = r.get("playlistItemData", {}).get("videoId")
+                                                thumb = r.get("thumbnail", {}).get("musicThumbnailRenderer", {}).get("thumbnail", {}).get("thumbnails", [{}])[-1].get("url")
+                                                if vid and title:
+                                                    tracks.append({
+                                                        "id": vid,
+                                                        "yt_id": vid,
+                                                        "title": title,
+                                                        "artist": artist,
+                                                        "thumbnail": thumb,
+                                                        "duration": "--:--"
+                                                    })
+                                            except Exception:
+                                                pass
+                    except Exception as e:
+                        print(f"Warning: Failed to fetch tracks for YouTube Music genre {gtitle}: {e}")
 
-        # Fetch top tracks for this genre
-        tr_data = fetch_json(f"https://api.deezer.com/chart/{gid}/tracks")
-        top_tracks = []
-        if tr_data and "data" in tr_data:
-            for t in tr_data["data"][:12]:
-                top_tracks.append({
-                    "title": t.get("title", "Unknown"),
-                    "artist": t.get("artist", {}).get("name", "Unknown Artist"),
-                    "thumbnail": t.get("album", {}).get("cover_medium") or t.get("album", {}).get("cover_small") or pic,
-                    "duration": f"{t.get('duration', 0) // 60}:{t.get('duration', 0) % 60:02d}",
-                    "external_id": str(t.get("id", "")),
-                    "yt_id": ""
+                cover = tracks[0]["thumbnail"] if tracks else "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500"
+                genres_list.append({
+                    "genre_id": idx,
+                    "name": gtitle,
+                    "picture": cover,
+                    "tracks": tracks[:15]
                 })
 
-        genres_list.append({
-            "genre_id": gid,
-            "name": gname,
-            "picture": pic,
-            "tracks": top_tracks
-        })
+        except Exception as e:
+            print(f"Error fetching YouTube Music genres: {e}")
 
-    print(f"Total Genres fetched: {len(genres_list)}")
+    # Fallback to Deezer if YouTube Music completely failed
+    if not genres_list:
+        print("Fallback: Fetching genres from Deezer...")
+        dz_res = fetch_json("https://api.deezer.com/genre")
+        if dz_res and "data" in dz_res:
+            for idx, g in enumerate([item for item in dz_res["data"] if item.get("id") != 0][:16], start=1):
+                gid = g.get("id")
+                genres_list.append({
+                    "genre_id": idx,
+                    "name": g.get("name"),
+                    "picture": g.get("picture_medium") or g.get("picture") or "",
+                    "tracks": []
+                })
+
+    print(f"Total Genres fetched from YouTube Music: {len(genres_list)}")
     return genres_list
 
 
