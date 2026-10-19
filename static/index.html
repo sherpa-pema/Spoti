@@ -757,6 +757,8 @@
       try {
         const tracks = await SpotiDB.getAllTracks();
         offlineTrackIdSet = new Set(tracks.map(t => t.id));
+        const countEl = document.getElementById('offline-songs-count');
+        if (countEl) countEl.innerText = tracks.length;
       } catch (e) {
         offlineTrackIdSet = new Set();
       }
@@ -1358,6 +1360,8 @@
 
         const offlineTracks = await SpotiDB.getAllTracks();
         const offlineCount = offlineTracks.length;
+        const offlineBadgeEl = document.getElementById('offline-songs-count');
+        if (offlineBadgeEl) offlineBadgeEl.innerText = offlineCount;
 
         userPlaylistsCache.forEach(pl => {
           let badgeText = `${pl.track_count || 0} ${pl.track_count === 1 ? 'song' : 'songs'}`;
@@ -2035,10 +2039,9 @@
 
           let actionButtonsHtml = '';
           if (isUserPlaylist) {
-            // User custom playlist: remove like and download buttons
-            // If downloaded, show green "On Phone" badge. Always offer remove from playlist option.
+            // User custom playlist: if downloaded show "On Phone" badge, otherwise offer download button
             actionButtonsHtml = `
-              ${isDownloaded ? '<span class="text-xs text-emerald-400 font-medium px-2 py-0.5 bg-emerald-500/10 rounded-md">On Phone</span>' : ''}
+              ${isDownloaded ? '<span class="text-xs text-emerald-400 font-medium px-2 py-0.5 bg-emerald-500/10 rounded-md">On Phone</span>' : renderDownloadBtnHtml(t)}
               <button onclick="event.stopPropagation(); removeTrackFromCustomPlaylist('${playlistId}', '${t.id}', event)" class="p-2 text-red-400 hover:text-red-300 active:scale-95 transition" title="Remove from Playlist">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
               </button>
@@ -2112,7 +2115,7 @@
         for (const t of tracks) {
           const exists = await SpotiDB.getTrack(t.id);
           if (!exists) {
-            downloadSingleTrack(t.id, t.title, t.artist);
+            downloadSingleTrack(t.id, t.title, t.artist, t.thumbnail);
             count++;
           }
         }
