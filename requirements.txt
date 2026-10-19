@@ -1,0 +1,7 @@
+fastapi>=0.68.0
+uvicorn>=0.15.0
+ytmusicapi>=1.7.0
+yt-dlp>=2025.01.01
+mutagen>=1.45.0
+pocketbase>=0.4.0
+pydantic<2.0.0

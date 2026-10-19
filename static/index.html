@@ -1,0 +1,2082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0c0d12">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Spoti</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="icon" type="image/png" href="/static/icon.png">
+  <link rel="apple-touch-icon" href="/static/icon.png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
+    }
+    html {
+      width: 100%;
+      height: 100%;
+      min-height: 100%;
+      min-height: -webkit-fill-available;
+      overflow: hidden;
+    }
+    body {
+      width: 100%;
+      height: 100%;
+      min-height: 100%;
+      min-height: -webkit-fill-available;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      overscroll-behavior: none;
+      background-color: #0c0d12;
+      color: #f3f4f6;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .app-header {
+      padding-top: max(calc(env(safe-area-inset-top, 0px) + 6px), 12px);
+      background-color: #0c0d12;
+    }
+    .app-main {
+      overscroll-behavior-y: contain;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: calc(56px + max(env(safe-area-inset-bottom, 0px), 10px) + 4rem);
+    }
+    .app-nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: calc(56px + max(env(safe-area-inset-bottom, 0px), 0px));
+      padding-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
+      box-sizing: border-box;
+    }
+    .app-mini-player {
+      bottom: calc(56px + max(env(safe-area-inset-bottom, 0px), 0px) + 8px);
+    }
+    .app-drawer {
+      padding-top: max(calc(env(safe-area-inset-top, 0px) + 12px), 20px);
+      padding-bottom: max(calc(env(safe-area-inset-bottom, 0px), 16px) + 1.5rem);
+    }
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 4px; }
+
+    input[type=range] {
+      -webkit-appearance: none;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 9999px;
+      height: 4px;
+      outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #6366f1;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(99, 102, 241, 0.6);
+      transition: transform 0.1s ease;
+    }
+    input[type=range]::-webkit-slider-thumb:hover, input[type=range]::-webkit-slider-thumb:active {
+      transform: scale(1.3);
+    }
+    .line-clamp-1 {
+      display: -webkit-box;
+      -webkit-line-clamp: 1;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .line-clamp-2 {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .glass-nav {
+      background: rgba(18, 19, 26, 0.92);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .glass-card {
+      background: rgba(25, 27, 36, 0.7);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    #now-playing-drawer {
+      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+  </style>
+</head>
+<body class="w-full h-full flex flex-col antialiased">
+
+  <!-- ============================================================ -->
+  <!-- 1. Top Header -->
+  <!-- ============================================================ -->
+  <header class="app-header px-5 pb-2 flex items-center justify-between z-10 shrink-0">
+    <div class="flex items-center gap-2.5">
+      <img src="/static/icon.png" class="w-8 h-8 rounded-lg shadow-md shadow-black/40" alt="Logo">
+      <span class="font-bold text-lg tracking-tight text-white">
+        Spoti
+      </span>
+    </div>
+    <div class="flex items-center gap-2">
+      <!-- User Profile / Login Button -->
+      <div class="relative">
+        <button id="user-profile-btn" onclick="toggleUserDropdown()" class="px-2.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 transition text-xs font-medium text-gray-200 flex items-center gap-1.5 border border-white/10">
+          <span id="user-avatar-icon">👤</span>
+          <span id="user-name-display">Login</span>
+        </button>
+
+        <!-- User Dropdown Menu -->
+        <div id="user-dropdown-menu" class="hidden absolute right-0 mt-2 w-48 rounded-2xl bg-[#161a26] border border-white/10 shadow-2xl p-1.5 text-xs z-50">
+          <div id="user-status-header" class="px-3 py-2 border-b border-white/10 text-gray-400">
+            Signed in as <b id="dropdown-username" class="text-white block truncate">Guest</b>
+          </div>
+          <button onclick="openAuthModal('register')" class="w-full text-left px-3 py-2 rounded-xl hover:bg-white/10 text-gray-200 flex items-center gap-2 transition">
+            <span>➕</span> Switch / New Profile
+          </button>
+          <button onclick="handleLogout()" class="w-full text-left px-3 py-2 rounded-xl hover:bg-red-500/20 text-red-400 flex items-center gap-2 transition">
+            <span>🚪</span> Log Out
+          </button>
+        </div>
+      </div>
+
+      <!-- QR code button to connect phone -->
+      <button onclick="openQrModal()" class="p-2 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 transition text-gray-300" title="Connect Phone via Wi-Fi">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ============================================================ -->
+  <!-- 2. Main Scrollable Container (Tabs) -->
+  <!-- ============================================================ -->
+  <main id="main-content" class="app-main flex-1 overflow-y-auto px-4 pt-1">
+    
+    <!-- TAB: HOME / EXPLORE -->
+    <section id="tab-home" class="space-y-6">
+      <!-- Trending Carousel / Cards -->
+      <div>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <span>🔥</span> Trending Hits
+          </h2>
+          <span class="text-xs text-indigo-400 font-medium cursor-pointer" onclick="loadTrending()">Refresh</span>
+        </div>
+        <div id="trending-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5">
+          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+        </div>
+      </div>
+
+      <!-- Moods & Genres -->
+      <div>
+        <h2 class="text-lg font-bold text-white mb-3 flex items-center gap-2">
+          <span>✨</span> Moods & Genres
+        </h2>
+        <div id="moods-container" class="flex gap-2 overflow-x-auto pb-2 scrollbar-none"></div>
+        <div id="mood-playlists-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5 mt-3 hidden"></div>
+      </div>
+    </section>
+
+    <!-- TAB: SEARCH -->
+    <section id="tab-search" class="space-y-4 hidden">
+      <div class="relative">
+        <input 
+          type="search" 
+          id="search-input" 
+          placeholder="Search songs, artists, playlists..." 
+          class="w-full bg-white/10 text-white placeholder-gray-400 px-4 py-3 pl-11 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 transition text-sm"
+          onkeydown="if(event.key==='Enter') performSearch()"
+        />
+        <svg class="w-5 h-5 text-gray-400 absolute left-3.5 top-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+      </div>
+
+      <div class="flex gap-2 text-xs">
+        <button onclick="setSearchFilter('songs')" id="filter-songs" class="px-3.5 py-1.5 rounded-full bg-indigo-600 text-white font-medium transition">Songs</button>
+        <button onclick="setSearchFilter('playlists')" id="filter-playlists" class="px-3.5 py-1.5 rounded-full bg-white/10 text-gray-300 font-medium transition">Playlists</button>
+      </div>
+
+      <div id="search-results" class="space-y-2.5 pt-1">
+        <div class="text-center py-16 text-gray-500 text-sm">Type a song or artist name above to search</div>
+      </div>
+    </section>
+
+    <!-- TAB: LIBRARY (PLAYLISTS & DOWNLOADED SONGS) -->
+    <section id="tab-library" class="space-y-4 hidden">
+      <!-- Library Header with "+ New Playlist" -->
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <span>📚</span> Your Library
+          </h2>
+          <p class="text-xs text-gray-400">Playlists & offline music</p>
+        </div>
+        <!-- Create Playlist Trigger Button -->
+        <button onclick="openCreatePlaylistModal()" class="text-xs bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 active:scale-95 transition">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          <span>New Playlist</span>
+        </button>
+      </div>
+
+      <!-- Subtabs: Playlists vs Downloaded -->
+      <div class="flex gap-2 text-xs border-b border-white/10 pb-2">
+        <button id="lib-subtab-playlists" onclick="switchLibrarySubtab('playlists')" class="px-3.5 py-1.5 rounded-xl bg-white/10 text-white font-medium transition">
+          Playlists (<span id="user-pl-count">0</span>)
+        </button>
+        <button id="lib-subtab-offline" onclick="switchLibrarySubtab('offline')" class="px-3.5 py-1.5 rounded-xl text-gray-400 hover:text-white transition">
+          Downloaded Songs (<span id="offline-songs-count">0</span>)
+        </button>
+      </div>
+
+      <!-- Subview: Custom User Playlists -->
+      <div id="library-playlists-view" class="space-y-3">
+        <div id="user-playlists-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5">
+          <!-- Playlists injected here -->
+        </div>
+      </div>
+
+      <!-- Subview: Offline Downloaded Songs -->
+      <div id="library-offline-view" class="space-y-2 hidden">
+        <div id="library-container" class="space-y-2">
+          <!-- Local songs loaded here -->
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: PLAYLIST DETAIL VIEW (DYNAMIC FOR YOUTUBE & CUSTOM USER PLAYLISTS) -->
+    <section id="tab-playlist" class="space-y-4 hidden">
+      <button onclick="switchTab(activePlaylistIsUser ? 'library' : 'home')" class="text-xs text-indigo-400 flex items-center gap-1">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+        Back
+      </button>
+
+      <div class="flex items-center gap-4 bg-white/5 p-4 rounded-2xl relative">
+        <img id="pl-cover" class="w-20 h-20 rounded-xl object-cover shadow" src="" alt="Cover">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <h2 id="pl-title" class="font-bold text-base text-white line-clamp-1">Playlist</h2>
+            <span id="pl-custom-badge" class="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-md font-medium hidden">Custom</span>
+          </div>
+          <p id="pl-desc" class="text-xs text-gray-400 line-clamp-2 mt-0.5"></p>
+          
+          <div class="flex items-center gap-2 mt-2.5">
+            <button id="pl-play-all-btn" onclick="playEntirePlaylist()" class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
+              <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              <span>Play All</span>
+            </button>
+            <button id="pl-download-all-btn" onclick="downloadAllPlaylistTracks()" class="text-xs bg-white/10 hover:bg-white/15 text-gray-200 font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition">
+              <span>⬇️</span> Download All
+            </button>
+            <!-- Delete Button for User Custom Playlists -->
+            <button id="pl-delete-btn" onclick="deleteCurrentCustomPlaylist()" class="text-xs text-red-400 hover:text-red-300 p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 ml-auto hidden" title="Delete Playlist">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="playlist-tracks-container" class="space-y-2">
+        <!-- Playlist tracks -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============================================================ -->
+  <!-- 3. Sticky Bottom Mini-Player Bar -->
+  <!-- ============================================================ -->
+  <div id="mini-player" class="app-mini-player fixed left-0 right-0 px-3 z-30 hidden" onclick="openNowPlayingDrawer()">
+    <div class="glass-card bg-[#161822]/95 border border-white/10 rounded-2xl p-2.5 flex items-center justify-between shadow-2xl shadow-black/80">
+      <div class="flex items-center gap-3 min-w-0 flex-1">
+        <img id="mini-thumb" src="" class="w-11 h-11 rounded-lg object-cover shadow" alt="art">
+        <div class="min-w-0 flex-1">
+          <div id="mini-title" class="text-sm font-semibold text-white line-clamp-1">Song Title</div>
+          <div id="mini-artist" class="text-xs text-gray-400 line-clamp-1">Artist Name</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-1.5" onclick="event.stopPropagation()">
+        <!-- Like / Favorite button on mini player -->
+        <button id="mini-like-btn" onclick="toggleLikeCurrentTrack()" class="p-2 text-gray-400 hover:text-red-400" title="Like Song">
+          <svg id="mini-like-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+        </button>
+        <!-- Add to Playlist button on mini player -->
+        <button onclick="promptAddToPlaylist(currentTrack)" class="p-2 text-gray-400 hover:text-white" title="Add to Playlist">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        </button>
+        <!-- Download button -->
+        <button id="mini-dl-btn" onclick="downloadCurrentTrack()" class="p-2 text-gray-300 hover:text-white" title="Download MP3">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        </button>
+        <!-- Play / Pause -->
+        <button id="mini-play-btn" onclick="togglePlayPause()" class="w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 flex items-center justify-center text-white shadow-lg shadow-indigo-600/30">
+          <svg id="mini-play-icon" class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- 4. Mobile Bottom Navigation -->
+  <!-- ============================================================ -->
+  <nav class="app-nav fixed bottom-0 left-0 right-0 glass-nav z-20 flex justify-around items-center px-4 text-xs">
+    <button onclick="switchTab('home')" id="nav-home" class="flex flex-col items-center gap-1 text-indigo-400 transition">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+      <span>Explore</span>
+    </button>
+    <button onclick="switchTab('search')" id="nav-search" class="flex flex-col items-center gap-1 text-gray-400 hover:text-white transition">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+      <span>Search</span>
+    </button>
+    <button onclick="switchTab('library')" id="nav-library" class="flex flex-col items-center gap-1 text-gray-400 hover:text-white transition">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+      <span>Library</span>
+    </button>
+  </nav>
+
+  <!-- ============================================================ -->
+  <!-- 5. Full-Screen Now Playing Drawer / Sheet -->
+  <!-- ============================================================ -->
+  <div id="now-playing-drawer" class="app-drawer fixed inset-0 bg-[#0d0e14] z-50 flex flex-col justify-between px-6 transform translate-y-full overflow-y-auto">
+    <div class="flex items-center justify-between shrink-0">
+      <button onclick="closeNowPlayingDrawer()" class="p-2 text-gray-400 hover:text-white rounded-full bg-white/5">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+      </button>
+      <div class="text-center">
+        <div class="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">Playing From</div>
+        <div id="drawer-source-label" class="text-xs text-indigo-400 font-medium">YouTube Music</div>
+      </div>
+      <div class="flex items-center gap-1">
+        <button id="drawer-like-btn" onclick="toggleLikeCurrentTrack()" class="p-2 text-gray-400 hover:text-red-400 rounded-full bg-white/5" title="Like Song">
+          <svg id="drawer-like-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+        </button>
+        <button onclick="promptAddToPlaylist(currentTrack)" class="p-2 text-gray-400 hover:text-white rounded-full bg-white/5" title="Add to Playlist">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        </button>
+        <button onclick="downloadCurrentTrack()" class="p-2 text-gray-400 hover:text-white rounded-full bg-white/5" title="Download MP3">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Center Album Cover -->
+    <div class="my-auto flex flex-col items-center py-6">
+      <div class="relative w-64 h-64 sm:w-80 sm:h-80 max-w-[85vw] max-h-[85vw]">
+        <img id="drawer-thumb" class="w-full h-full object-cover rounded-3xl shadow-2xl shadow-indigo-900/40 border border-white/10" src="" alt="Album Art">
+      </div>
+    </div>
+
+    <!-- Track Info & Controls -->
+    <div class="space-y-5 shrink-0 max-w-lg mx-auto w-full">
+      <div class="flex items-center justify-between">
+        <div class="min-w-0 flex-1 pr-4">
+          <h1 id="drawer-title" class="text-xl font-bold text-white line-clamp-1">Song Title</h1>
+          <p id="drawer-artist" class="text-sm text-gray-400 line-clamp-1 mt-0.5">Artist Name</p>
+        </div>
+        <span id="drawer-dl-badge" class="text-[11px] bg-white/10 text-gray-300 px-2.5 py-1 rounded-full">Stream</span>
+      </div>
+
+      <!-- Scrubber Bar -->
+      <div class="space-y-1.5">
+        <input type="range" id="seek-slider" min="0" max="100" value="0" class="w-full" oninput="onSeekInput()" onchange="onSeekChange()">
+        <div class="flex justify-between text-xs text-gray-400 font-mono">
+          <span id="current-time">0:00</span>
+          <span id="total-duration">0:00</span>
+        </div>
+      </div>
+
+      <!-- Playback Buttons -->
+      <div class="flex items-center justify-between px-4">
+        <button id="shuffle-btn" onclick="toggleShuffle()" class="text-gray-400 hover:text-white p-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+        </button>
+        <button onclick="playPrev()" class="text-gray-200 hover:text-white p-2 active:scale-90 transition">
+          <svg class="w-7 h-7 fill-current" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        </button>
+        <button id="drawer-play-btn" onclick="togglePlayPause()" class="w-16 h-16 rounded-full bg-gradient-to-tr from-indigo-600 to-purple-600 hover:scale-105 active:scale-95 transition flex items-center justify-center text-white shadow-xl shadow-indigo-600/40">
+          <svg id="drawer-play-icon" class="w-8 h-8 fill-current ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <button onclick="playNext()" class="text-gray-200 hover:text-white p-2 active:scale-90 transition">
+          <svg class="w-7 h-7 fill-current" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+        </button>
+        <button id="repeat-btn" onclick="toggleRepeat()" class="text-gray-400 hover:text-white p-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        </button>
+      </div>
+
+      <!-- Up Next / Radio Accordion -->
+      <div class="pt-2">
+        <div class="flex items-center justify-between text-xs text-gray-400 font-semibold uppercase tracking-wider mb-2">
+          <span>Up Next & Radio Recommendations</span>
+          <span id="queue-count" class="text-indigo-400"></span>
+        </div>
+        <div id="drawer-queue-container" class="max-h-40 overflow-y-auto space-y-1.5 pr-1"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- 6. Phone QR Code Connection Modal -->
+  <!-- ============================================================ -->
+  <div id="qr-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden" onclick="closeQrModal()">
+    <div class="bg-[#181924] border border-white/10 rounded-3xl p-6 max-w-sm w-full text-center space-y-4" onclick="event.stopPropagation()">
+      <div class="w-12 h-12 bg-indigo-500/10 text-indigo-400 rounded-full flex items-center justify-center mx-auto">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+      </div>
+      <div>
+        <h3 class="text-lg font-bold text-white">Play on Your Phone</h3>
+        <p class="text-xs text-gray-400 mt-1">Scan with your phone's camera while on the same Wi-Fi network.</p>
+      </div>
+      <div class="flex justify-center p-2 bg-[#121212] rounded-2xl border border-white/5">
+        <img id="qr-img" src="/api/qr" class="w-52 h-52 rounded-xl" alt="QR Code">
+      </div>
+      <div id="server-url-display" class="text-xs font-mono text-indigo-300 break-all select-all bg-white/5 p-2 rounded-lg">
+        http://...
+      </div>
+      <button onclick="closeQrModal()" class="w-full py-2.5 bg-white/10 hover:bg-white/15 text-white text-xs font-medium rounded-xl transition">
+        Done
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- 7. Create New Playlist Modal -->
+  <!-- ============================================================ -->
+  <div id="create-playlist-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden" onclick="closeCreatePlaylistModal()">
+    <div class="bg-[#181924] border border-white/10 rounded-3xl p-6 max-w-sm w-full space-y-4" onclick="event.stopPropagation()">
+      <div class="text-center">
+        <div class="w-12 h-12 bg-indigo-500/10 text-indigo-400 rounded-full flex items-center justify-center mx-auto mb-2">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        </div>
+        <h3 class="text-lg font-bold text-white">Create New Playlist</h3>
+        <p class="text-xs text-gray-400 mt-0.5">Build your personalized collection</p>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs text-gray-400 font-medium block mb-1">Playlist Name</label>
+          <input type="text" id="new-pl-name" placeholder="e.g. Chill Vibes, Workout Mix..." class="w-full bg-white/10 text-white placeholder-gray-500 px-4 py-2.5 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+        </div>
+        <div>
+          <label class="text-xs text-gray-400 font-medium block mb-1">Description (Optional)</label>
+          <input type="text" id="new-pl-desc" placeholder="e.g. Late night coding songs" class="w-full bg-white/10 text-white placeholder-gray-500 px-4 py-2.5 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+        </div>
+      </div>
+      <div class="flex gap-2.5 pt-2">
+        <button onclick="closeCreatePlaylistModal()" class="flex-1 py-2.5 bg-white/10 hover:bg-white/15 text-gray-300 text-xs font-medium rounded-xl transition">
+          Cancel
+        </button>
+        <button onclick="submitCreatePlaylist()" class="flex-1 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-semibold rounded-xl transition shadow-lg shadow-indigo-600/30">
+          Create
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- 8. Add Track to Playlist Modal -->
+  <!-- ============================================================ -->
+  <div id="add-to-playlist-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 hidden" onclick="closeAddToPlaylistModal()">
+    <div class="bg-[#181924] border border-white/10 rounded-t-3xl sm:rounded-3xl p-5 max-w-sm w-full space-y-3.5 max-h-[80vh] flex flex-col" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between">
+        <div>
+          <h3 class="text-base font-bold text-white">Add to Playlist</h3>
+          <p id="add-modal-song-title" class="text-xs text-indigo-400 line-clamp-1 mt-0.5">Song Name</p>
+        </div>
+        <button onclick="closeAddToPlaylistModal()" class="p-1.5 text-gray-400 hover:text-white rounded-full bg-white/5">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Quick create new playlist shortcut -->
+      <button onclick="openCreatePlaylistModal(true)" class="w-full p-2.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-medium flex items-center justify-center gap-1.5 transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        <span>Create New Playlist</span>
+      </button>
+
+      <!-- List of User's Playlists -->
+      <div id="add-modal-playlists-list" class="space-y-2 overflow-y-auto flex-1 pr-1">
+        <!-- Injected dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- 9. Auth Modal (Login & Sign Up) -->
+  <!-- ============================================================ -->
+  <div id="auth-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden" onclick="handleAuthBackdrop(event)">
+    <div class="bg-[#181924] border border-white/10 rounded-3xl p-6 max-w-sm w-full space-y-4" onclick="event.stopPropagation()">
+      <div class="text-center">
+        <div class="w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-2 text-xl">
+          🎵
+        </div>
+        <h3 id="auth-modal-title" class="text-lg font-bold text-white">Welcome to Spoti</h3>
+        <p id="auth-modal-desc" class="text-xs text-gray-400 mt-0.5">Sign in to your private music profile</p>
+      </div>
+
+      <!-- Auth Tabs: Login vs Register -->
+      <div class="flex rounded-xl bg-white/5 p-1 text-xs">
+        <button id="auth-tab-login" onclick="switchAuthTab('login')" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-white font-semibold transition">
+          Log In
+        </button>
+        <button id="auth-tab-register" onclick="switchAuthTab('register')" class="flex-1 py-1.5 rounded-lg text-gray-400 hover:text-white transition">
+          Create Account
+        </button>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs text-gray-400 font-medium block mb-1">Username</label>
+          <input type="text" id="auth-username" placeholder="e.g. alice" autocomplete="username" class="w-full bg-white/10 text-white placeholder-gray-500 px-4 py-2.5 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm" onkeydown="if(event.key==='Enter') document.getElementById('auth-password').focus()">
+        </div>
+        <div>
+          <label class="text-xs text-gray-400 font-medium block mb-1">Password</label>
+          <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password" class="w-full bg-white/10 text-white placeholder-gray-500 px-4 py-2.5 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm" onkeydown="if(event.key==='Enter') submitAuth()">
+        </div>
+      </div>
+
+      <div id="auth-error-msg" class="text-xs text-red-400 text-center hidden"></div>
+
+      <div class="flex gap-2 pt-2">
+        <button id="auth-cancel-btn" onclick="closeAuthModal()" class="flex-1 py-2.5 bg-white/10 hover:bg-white/15 text-white text-xs font-medium rounded-xl transition">
+          Cancel
+        </button>
+        <button id="auth-submit-btn" onclick="submitAuth()" class="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-emerald-600/30 transition">
+          Log In
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audio Element -->
+  <audio id="audio-engine" preload="auto"></audio>
+
+  <!-- Application Logic -->
+  <script>
+    const audio = document.getElementById('audio-engine');
+    let currentTrack = null;
+    let queue = [];
+    let queueIndex = -1;
+    let isPlaying = false;
+    let isSeeking = false;
+    let isShuffle = false;
+    let repeatMode = 0; // 0: none, 1: all, 2: one
+    let currentSearchFilter = 'songs';
+    let activeTab = 'home';
+    let librarySubtab = 'playlists';
+    let activePlaylistId = null;
+    let activePlaylistIsUser = false;
+    let userPlaylistsCache = [];
+    let trackPendingAddToPlaylist = null;
+    let currentUser = null;
+    let userLikedTrackIds = new Set();
+    let authMode = 'login';
+    let currentBlobUrl = null;
+
+    // -------------------------------------------------------------
+    // Client-Side Offline Storage Engine (IndexedDB)
+    // Audio files are stored locally in the phone's browser storage
+    // iPhone 7 acts purely as transient download proxy with 0 lingering bytes.
+    // -------------------------------------------------------------
+    const SpotiDB = {
+      dbName: 'SpotiOfflineDB',
+      version: 1,
+      db: null,
+
+      async open() {
+        if (this.db) return this.db;
+        return new Promise((resolve, reject) => {
+          const req = indexedDB.open(this.dbName, this.version);
+          req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('tracks')) {
+              const store = db.createObjectStore('tracks', { keyPath: 'id' });
+              store.createIndex('savedAt', 'savedAt', { unique: false });
+            }
+          };
+          req.onsuccess = (e) => {
+            this.db = e.target.result;
+            resolve(this.db);
+          };
+          req.onerror = (e) => reject(e.target.error);
+        });
+      },
+
+      async saveTrack(track) {
+        const db = await this.open();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction('tracks', 'readwrite');
+          const store = tx.objectStore('tracks');
+          const record = {
+            id: track.id,
+            title: track.title || 'Unknown Title',
+            artist: track.artist || 'Unknown Artist',
+            duration: track.duration || '--:--',
+            thumbnail: track.thumbnail || '',
+            album: track.album || '',
+            blob: track.blob,
+            sizeBytes: track.blob ? track.blob.size : 0,
+            sizeFormatted: track.sizeFormatted || (track.blob ? (track.blob.size / (1024 * 1024)).toFixed(1) + ' MB' : ''),
+            savedAt: Date.now()
+          };
+          const req = store.put(record);
+          req.onsuccess = () => resolve(record);
+          req.onerror = (e) => reject(e.target.error);
+        });
+      },
+
+      async getTrack(id) {
+        try {
+          const db = await this.open();
+          return new Promise((resolve) => {
+            const tx = db.transaction('tracks', 'readonly');
+            const store = tx.objectStore('tracks');
+            const req = store.get(id);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => resolve(null);
+          });
+        } catch (e) {
+          return null;
+        }
+      },
+
+      async getAllTracks() {
+        try {
+          const db = await this.open();
+          return new Promise((resolve) => {
+            const tx = db.transaction('tracks', 'readonly');
+            const store = tx.objectStore('tracks');
+            const req = store.getAll();
+            req.onsuccess = () => {
+              const tracks = req.result || [];
+              tracks.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+              resolve(tracks);
+            };
+            req.onerror = () => resolve([]);
+          });
+        } catch (e) {
+          return [];
+        }
+      },
+
+      async deleteTrack(id) {
+        const db = await this.open();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction('tracks', 'readwrite');
+          const store = tx.objectStore('tracks');
+          const req = store.delete(id);
+          req.onsuccess = () => resolve(true);
+          req.onerror = (e) => reject(e.target.error);
+        });
+      },
+
+      async count() {
+        try {
+          const db = await this.open();
+          return new Promise((resolve) => {
+            const tx = db.transaction('tracks', 'readonly');
+            const store = tx.objectStore('tracks');
+            const req = store.count();
+            req.onsuccess = () => resolve(req.result || 0);
+            req.onerror = () => resolve(0);
+          });
+        } catch (e) {
+          return 0;
+        }
+      }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/static/sw.js').catch(err => console.log('SW error:', err));
+    }
+
+    async function authFetch(url, options = {}) {
+      options.headers = options.headers || {};
+      const token = localStorage.getItem('spoti_token');
+      if (token) {
+        if (options.headers instanceof Headers) {
+          options.headers.set('Authorization', `Bearer ${token}`);
+        } else {
+          options.headers['Authorization'] = `Bearer ${token}`;
+        }
+      }
+      return await fetch(url, options);
+    }
+
+    async function initAuth() {
+      const token = localStorage.getItem('spoti_token');
+      const nameDisplay = document.getElementById('user-name-display');
+      const dropdownUser = document.getElementById('dropdown-username');
+      const avatarIcon = document.getElementById('user-avatar-icon');
+
+      if (!token) {
+        currentUser = null;
+        userLikedTrackIds.clear();
+        if (nameDisplay) nameDisplay.innerText = "Login";
+        if (dropdownUser) dropdownUser.innerText = "Guest (Not logged in)";
+        if (avatarIcon) avatarIcon.innerText = "👤";
+        updateNowPlayingLikeState();
+        return false;
+      }
+
+      try {
+        const res = await authFetch('/api/auth/me');
+        const data = await res.json();
+        if (data.authenticated && data.user) {
+          currentUser = data.user;
+          localStorage.setItem('spoti_user', JSON.stringify(currentUser));
+          if (nameDisplay) nameDisplay.innerText = currentUser.username;
+          if (dropdownUser) dropdownUser.innerText = currentUser.username;
+          if (avatarIcon) avatarIcon.innerText = "🎧";
+          await syncUserFavorites();
+          return true;
+        } else {
+          localStorage.removeItem('spoti_token');
+          localStorage.removeItem('spoti_user');
+          currentUser = null;
+          userLikedTrackIds.clear();
+          if (nameDisplay) nameDisplay.innerText = "Login";
+          if (dropdownUser) dropdownUser.innerText = "Guest (Not logged in)";
+          if (avatarIcon) avatarIcon.innerText = "👤";
+          updateNowPlayingLikeState();
+          return false;
+        }
+      } catch (e) {
+        console.error("Auth check failed:", e);
+        const cachedUser = localStorage.getItem('spoti_user');
+        if (cachedUser) {
+          try {
+            currentUser = JSON.parse(cachedUser);
+            if (nameDisplay) nameDisplay.innerText = currentUser.username;
+            if (dropdownUser) dropdownUser.innerText = currentUser.username;
+            if (avatarIcon) avatarIcon.innerText = "🎧";
+            return true;
+          } catch(err) {}
+        }
+        return false;
+      }
+    }
+
+    async function syncUserFavorites() {
+      if (!currentUser) {
+        userLikedTrackIds.clear();
+        updateNowPlayingLikeState();
+        return;
+      }
+      try {
+        const res = await authFetch('/api/favorites');
+        if (res.ok) {
+          const data = await res.json();
+          userLikedTrackIds = new Set((data.tracks || []).map(t => t.id));
+          updateNowPlayingLikeState();
+        }
+      } catch (e) {
+        console.error("Sync favorites error:", e);
+      }
+    }
+
+    function toggleUserDropdown() {
+      if (!currentUser) {
+        openAuthModal('login');
+        return;
+      }
+      const menu = document.getElementById('user-dropdown-menu');
+      if (menu) menu.classList.toggle('hidden');
+    }
+
+    document.addEventListener('click', (e) => {
+      const profileDiv = document.getElementById('user-profile-btn')?.parentElement;
+      const menu = document.getElementById('user-dropdown-menu');
+      if (profileDiv && menu && !profileDiv.contains(e.target)) {
+        menu.classList.add('hidden');
+      }
+    });
+
+    let isAuthStartup = false;
+
+    function openAuthModal(mode = 'login', startup = false) {
+      isAuthStartup = startup;
+      const menu = document.getElementById('user-dropdown-menu');
+      if (menu) menu.classList.add('hidden');
+
+      switchAuthTab(mode);
+      document.getElementById('auth-username').value = '';
+      document.getElementById('auth-password').value = '';
+      const errEl = document.getElementById('auth-error-msg');
+      if (errEl) {
+        errEl.classList.add('hidden');
+        errEl.innerText = '';
+      }
+
+      const cancelBtn = document.getElementById('auth-cancel-btn');
+      if (cancelBtn) {
+        if (!currentUser || isAuthStartup) {
+          cancelBtn.innerText = "Explore as Guest";
+        } else {
+          cancelBtn.innerText = "Cancel";
+        }
+      }
+
+      document.getElementById('auth-modal').classList.remove('hidden');
+      setTimeout(() => document.getElementById('auth-username').focus(), 100);
+    }
+
+    function handleAuthBackdrop(event) {
+      if (!currentUser && isAuthStartup) {
+        return;
+      }
+      closeAuthModal();
+    }
+
+    function closeAuthModal() {
+      document.getElementById('auth-modal').classList.add('hidden');
+      isAuthStartup = false;
+    }
+
+    function switchAuthTab(mode) {
+      authMode = mode;
+      const titleEl = document.getElementById('auth-modal-title');
+      const descEl = document.getElementById('auth-modal-desc');
+      const submitBtn = document.getElementById('auth-submit-btn');
+      const tabLogin = document.getElementById('auth-tab-login');
+      const tabRegister = document.getElementById('auth-tab-register');
+      const errEl = document.getElementById('auth-error-msg');
+      if (errEl) errEl.classList.add('hidden');
+
+      if (mode === 'login') {
+        titleEl.innerText = "Welcome back to Spoti";
+        descEl.innerText = "Sign in to access your playlists & likes";
+        submitBtn.innerText = "Log In";
+        tabLogin.className = "flex-1 py-1.5 rounded-lg bg-emerald-500 text-white font-semibold transition";
+        tabRegister.className = "flex-1 py-1.5 rounded-lg text-gray-400 hover:text-white transition";
+      } else {
+        titleEl.innerText = "Create Spoti Account";
+        descEl.innerText = "Set up your private music profile on this server";
+        submitBtn.innerText = "Create Account";
+        tabRegister.className = "flex-1 py-1.5 rounded-lg bg-emerald-500 text-white font-semibold transition";
+        tabLogin.className = "flex-1 py-1.5 rounded-lg text-gray-400 hover:text-white transition";
+      }
+    }
+
+    async function submitAuth() {
+      const username = document.getElementById('auth-username').value.trim();
+      const password = document.getElementById('auth-password').value;
+      const errEl = document.getElementById('auth-error-msg');
+      const submitBtn = document.getElementById('auth-submit-btn');
+
+      if (!username || username.length < 2) {
+        errEl.innerText = "Username must be at least 2 characters.";
+        errEl.classList.remove('hidden');
+        return;
+      }
+      if (!password || password.length < 4) {
+        errEl.innerText = "Password must be at least 4 characters.";
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.innerText = "Connecting...";
+
+      const endpoint = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          errEl.innerText = data.detail || "Authentication failed.";
+          errEl.classList.remove('hidden');
+          submitBtn.disabled = false;
+          submitBtn.innerText = authMode === 'login' ? 'Log In' : 'Create Account';
+          return;
+        }
+
+        localStorage.setItem('spoti_token', data.token);
+        localStorage.setItem('spoti_user', JSON.stringify({ id: data.id, username: data.username }));
+        currentUser = { id: data.id, username: data.username };
+        closeAuthModal();
+        await initAuth();
+        await loadUserPlaylists();
+        showToast(`✓ Welcome, ${data.username}!`);
+      } catch (e) {
+        errEl.innerText = "Connection error. Make sure server is reachable.";
+        errEl.classList.remove('hidden');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerText = authMode === 'login' ? 'Log In' : 'Create Account';
+      }
+    }
+
+    function handleLogout() {
+      localStorage.removeItem('spoti_token');
+      localStorage.removeItem('spoti_user');
+      currentUser = null;
+      userLikedTrackIds.clear();
+      const menu = document.getElementById('user-dropdown-menu');
+      if (menu) menu.classList.add('hidden');
+      initAuth();
+      loadUserPlaylists();
+      updateNowPlayingLikeState();
+      showToast("Logged out successfully");
+      openAuthModal('login', true);
+    }
+
+    async function toggleLikeCurrentTrack() {
+      if (!currentTrack) return;
+      await toggleLikeTrack(currentTrack);
+    }
+
+    async function toggleLikeTrack(track, event) {
+      if (event) event.stopPropagation();
+      if (!currentUser) {
+        showToast("Please log in to like songs");
+        openAuthModal('login');
+        return;
+      }
+
+      const isLiked = userLikedTrackIds.has(track.id);
+      if (isLiked) {
+        try {
+          const res = await authFetch(`/api/favorites/${track.id}`, { method: 'DELETE' });
+          if (res.ok) {
+            userLikedTrackIds.delete(track.id);
+            showToast("Removed from Liked Songs");
+            updateNowPlayingLikeState();
+            if (activePlaylistId === 'user_pl_liked_songs') {
+              openPlaylist('user_pl_liked_songs', true);
+            }
+            if (typeof loadUserPlaylists === 'function') loadUserPlaylists();
+          }
+        } catch (e) {
+          showToast("Failed to remove like");
+        }
+      } else {
+        try {
+          const res = await authFetch('/api/favorites', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: track.id,
+              title: track.title,
+              artist: track.artist || '',
+              duration: track.duration || '',
+              thumbnail: track.thumbnail || '',
+              album: track.album || ''
+            })
+          });
+          if (res.ok) {
+            userLikedTrackIds.add(track.id);
+            showToast("Added to Liked Songs ❤️");
+            updateNowPlayingLikeState();
+            if (activePlaylistId === 'user_pl_liked_songs') {
+              openPlaylist('user_pl_liked_songs', true);
+            }
+            if (typeof loadUserPlaylists === 'function') loadUserPlaylists();
+          }
+        } catch (e) {
+          showToast("Failed to like song");
+        }
+      }
+    }
+
+    function updateNowPlayingLikeState() {
+      const isLiked = currentTrack && userLikedTrackIds.has(currentTrack.id);
+      const miniIcon = document.getElementById('mini-like-icon');
+      const miniBtn = document.getElementById('mini-like-btn');
+      const drawerIcon = document.getElementById('drawer-like-icon');
+      const drawerBtn = document.getElementById('drawer-like-btn');
+
+      if (miniIcon && miniBtn) {
+        if (isLiked) {
+          miniIcon.setAttribute('fill', 'currentColor');
+          miniBtn.className = "p-2 text-red-500 hover:text-red-400";
+        } else {
+          miniIcon.setAttribute('fill', 'none');
+          miniBtn.className = "p-2 text-gray-400 hover:text-red-400";
+        }
+      }
+
+      if (drawerIcon && drawerBtn) {
+        if (isLiked) {
+          drawerIcon.setAttribute('fill', 'currentColor');
+          drawerBtn.className = "p-2 text-red-500 hover:text-red-400 rounded-full bg-white/5";
+        } else {
+          drawerIcon.setAttribute('fill', 'none');
+          drawerBtn.className = "p-2 text-gray-400 hover:text-red-400 rounded-full bg-white/5";
+        }
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      window.scrollTo(0, 0);
+      const loggedIn = await initAuth();
+      if (!loggedIn) {
+        openAuthModal('login', true);
+      }
+      loadTrending();
+      loadServerInfo();
+      loadUserPlaylists();
+      setupAudioEvents();
+      setupMediaSession();
+    });
+
+    // Prevent document-level scroll drift in iOS PWA standalone mode
+    window.addEventListener('scroll', () => {
+      if (window.scrollY !== 0 || window.scrollX !== 0) {
+        window.scrollTo(0, 0);
+      }
+    }, { passive: true });
+
+    async function loadServerInfo() {
+      try {
+        const res = await fetch('/api/info');
+        const data = await res.json();
+        document.getElementById('server-url-display').innerText = data.url;
+      } catch (e) {
+        console.error('Info error:', e);
+      }
+    }
+
+    function switchTab(tab) {
+      activeTab = tab;
+      ['home', 'search', 'library', 'playlist'].forEach(t => {
+        const el = document.getElementById(`tab-${t}`);
+        if (el) el.classList.add('hidden');
+        const navBtn = document.getElementById(`nav-${t}`);
+        if (navBtn) navBtn.className = "flex flex-col items-center gap-1 text-gray-400 hover:text-white transition";
+      });
+
+      const activeEl = document.getElementById(`tab-${tab}`);
+      if (activeEl) activeEl.classList.remove('hidden');
+
+      const activeNav = document.getElementById(`nav-${tab}`);
+      if (activeNav) activeNav.className = "flex flex-col items-center gap-1 text-indigo-400 font-semibold transition";
+
+      if (tab === 'library') {
+        if (librarySubtab === 'playlists') loadUserPlaylists();
+        else loadLibrary();
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Library Subtabs & Custom Playlists
+    // -------------------------------------------------------------
+    function switchLibrarySubtab(subtab) {
+      librarySubtab = subtab;
+      const plBtn = document.getElementById('lib-subtab-playlists');
+      const offBtn = document.getElementById('lib-subtab-offline');
+      const plView = document.getElementById('library-playlists-view');
+      const offView = document.getElementById('library-offline-view');
+
+      if (subtab === 'playlists') {
+        plBtn.className = "px-3.5 py-1.5 rounded-xl bg-white/10 text-white font-medium transition";
+        offBtn.className = "px-3.5 py-1.5 rounded-xl text-gray-400 hover:text-white transition";
+        plView.classList.remove('hidden');
+        offView.classList.add('hidden');
+        loadUserPlaylists();
+      } else {
+        offBtn.className = "px-3.5 py-1.5 rounded-xl bg-white/10 text-white font-medium transition";
+        plBtn.className = "px-3.5 py-1.5 rounded-xl text-gray-400 hover:text-white transition";
+        offView.classList.remove('hidden');
+        plView.classList.add('hidden');
+        loadLibrary();
+      }
+    }
+
+    async function loadUserPlaylists() {
+      const container = document.getElementById('user-playlists-grid');
+      container.innerHTML = '<div class="col-span-full py-6 text-center text-gray-400 text-sm">Loading playlists...</div>';
+
+      try {
+        const res = await authFetch('/api/user-playlists');
+        const data = await res.json();
+        userPlaylistsCache = data.playlists || [];
+        document.getElementById('user-pl-count').innerText = userPlaylistsCache.length;
+
+        container.innerHTML = '';
+        if (userPlaylistsCache.length === 0) {
+          container.innerHTML = `
+            <div class="col-span-full py-12 text-center text-gray-500 text-sm">
+              ${currentUser ? 'No playlists found.' : 'Log in to create your personal playlists & save favorites.'}<br>
+              <button onclick="openCreatePlaylistModal()" class="mt-3 text-xs bg-indigo-600/30 hover:bg-indigo-600/40 text-indigo-300 font-medium px-4 py-2 rounded-xl border border-indigo-500/20">
+                + Create Your First Playlist
+              </button>
+            </div>
+          `;
+          return;
+        }
+
+        const offlineCount = await SpotiDB.count();
+
+        userPlaylistsCache.forEach(pl => {
+          const card = document.createElement('div');
+          card.className = "glass-card p-2.5 rounded-2xl flex flex-col gap-2 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group relative";
+          card.onclick = () => openPlaylist(pl.id, true);
+
+          let badgeText = `${pl.track_count} ${pl.track_count === 1 ? 'song' : 'songs'}`;
+          let descText = pl.description || 'Custom Playlist';
+          if (pl.is_liked_playlist) {
+            badgeText = `❤️ ${pl.track_count} favorites`;
+          } else if (pl.is_offline_playlist) {
+            badgeText = `⬇️ ${offlineCount} on device`;
+            descText = `${offlineCount} songs saved on this device (offline)`;
+          }
+
+          card.innerHTML = `
+            <div class="w-full aspect-square rounded-xl overflow-hidden bg-black/40 relative">
+              <img src="${pl.thumbnail}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" alt="pl" loading="lazy">
+              <div class="absolute bottom-2 left-2 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-md text-[10px] text-white font-medium">
+                ${badgeText}
+              </div>
+            </div>
+            <div class="min-w-0">
+              <div class="text-sm font-semibold text-white line-clamp-1">${pl.title}</div>
+              <div class="text-xs text-gray-400 line-clamp-1">${descText}</div>
+            </div>
+          `;
+          container.appendChild(card);
+        });
+
+      } catch (e) {
+        container.innerHTML = '<div class="col-span-full py-6 text-center text-red-400 text-xs">Failed to load playlists.</div>';
+      }
+    }
+
+    // Modal: Create Playlist
+    function openCreatePlaylistModal(fromAddModal = false) {
+      if (!currentUser) {
+        showToast("Please log in to create custom playlists");
+        openAuthModal('login');
+        return;
+      }
+      if (fromAddModal) closeAddToPlaylistModal();
+      document.getElementById('new-pl-name').value = '';
+      document.getElementById('new-pl-desc').value = '';
+      document.getElementById('create-playlist-modal').classList.remove('hidden');
+      setTimeout(() => document.getElementById('new-pl-name').focus(), 100);
+    }
+
+    function closeCreatePlaylistModal() {
+      document.getElementById('create-playlist-modal').classList.add('hidden');
+    }
+
+    async function submitCreatePlaylist() {
+      if (!currentUser) {
+        showToast("Please log in to create playlists");
+        openAuthModal('login');
+        return;
+      }
+      const name = document.getElementById('new-pl-name').value.trim();
+      const desc = document.getElementById('new-pl-desc').value.trim();
+      if (!name) {
+        showToast("Please enter a playlist name");
+        return;
+      }
+
+      try {
+        const res = await authFetch('/api/user-playlists', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name, description: desc })
+        });
+        const createdPl = await res.json();
+        closeCreatePlaylistModal();
+        showToast(`✓ Playlist "${createdPl.title}" created!`);
+
+        // If there was a track waiting to be added, add it immediately
+        if (trackPendingAddToPlaylist) {
+          await addTrackToSpecificPlaylist(createdPl.id, trackPendingAddToPlaylist, createdPl.title);
+          trackPendingAddToPlaylist = null;
+        }
+
+        loadUserPlaylists();
+      } catch (e) {
+        showToast("Failed to create playlist");
+      }
+    }
+
+    // Modal: Add Track to Playlist
+    function promptAddToPlaylist(track) {
+      if (!track) return;
+      if (!currentUser) {
+        showToast("Please log in to add songs to playlists");
+        openAuthModal('login');
+        return;
+      }
+      trackPendingAddToPlaylist = track;
+      document.getElementById('add-modal-song-title').innerText = track.title;
+      renderAddToPlaylistList();
+      document.getElementById('add-to-playlist-modal').classList.remove('hidden');
+    }
+
+    function closeAddToPlaylistModal() {
+      document.getElementById('add-to-playlist-modal').classList.add('hidden');
+    }
+
+    async function renderAddToPlaylistList() {
+      const container = document.getElementById('add-modal-playlists-list');
+      container.innerHTML = '<div class="text-center py-4 text-gray-400 text-xs">Loading playlists...</div>';
+
+      try {
+        const res = await authFetch('/api/user-playlists');
+        const data = await res.json();
+        userPlaylistsCache = data.playlists || [];
+        const customPlaylists = userPlaylistsCache.filter(pl => pl.is_user_playlist && !pl.is_system);
+        container.innerHTML = '';
+
+        if (customPlaylists.length === 0) {
+          container.innerHTML = '<div class="text-center py-4 text-gray-500 text-xs">No custom playlists yet. Create one above!</div>';
+          return;
+        }
+
+        customPlaylists.forEach(pl => {
+          const row = document.createElement('div');
+          row.className = "flex items-center gap-3 p-2 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer";
+          row.onclick = () => addTrackToSpecificPlaylist(pl.id, trackPendingAddToPlaylist, pl.title);
+          row.innerHTML = `
+            <img src="${pl.thumbnail}" class="w-10 h-10 rounded-lg object-cover" alt="pl">
+            <div class="min-w-0 flex-1">
+              <div class="text-xs font-semibold text-white line-clamp-1">${pl.title}</div>
+              <div class="text-[11px] text-gray-400">${pl.track_count} songs</div>
+            </div>
+            <span class="text-xs text-indigo-400 font-medium px-2 py-1 bg-white/5 rounded-lg">+ Add</span>
+          `;
+          container.appendChild(row);
+        });
+
+      } catch (e) {
+        container.innerHTML = '<div class="text-center py-4 text-red-400 text-xs">Failed to load playlists</div>';
+      }
+    }
+
+    async function addTrackToSpecificPlaylist(playlistId, track, playlistName) {
+      if (!track) return;
+      try {
+        await authFetch(`/api/user-playlists/${playlistId}/tracks`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: track.id,
+            title: track.title,
+            artist: track.artist,
+            duration: track.duration,
+            thumbnail: track.thumbnail,
+            album: track.album || ""
+          })
+        });
+        closeAddToPlaylistModal();
+        showToast(`✓ Added to "${playlistName}"!`);
+        trackPendingAddToPlaylist = null;
+        loadUserPlaylists();
+      } catch (e) {
+        showToast("Failed to add song to playlist");
+      }
+    }
+
+    async function removeTrackFromCustomPlaylist(playlistId, trackId, event) {
+      if (event) event.stopPropagation();
+      try {
+        await authFetch(`/api/user-playlists/${playlistId}/tracks/${trackId}`, { method: 'DELETE' });
+        showToast("Track removed from playlist");
+        openPlaylist(playlistId, true);
+        loadUserPlaylists();
+      } catch (e) {
+        showToast("Failed to remove track");
+      }
+    }
+
+    async function deleteCurrentCustomPlaylist() {
+      if (!activePlaylistId || !confirm("Are you sure you want to delete this playlist?")) return;
+      try {
+        await authFetch(`/api/user-playlists/${activePlaylistId}`, { method: 'DELETE' });
+        showToast("Playlist deleted");
+        switchTab('library');
+        loadUserPlaylists();
+      } catch (e) {
+        showToast("Failed to delete playlist");
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Home / Trending / Moods
+    // -------------------------------------------------------------
+    async function loadTrending() {
+      const container = document.getElementById('trending-container');
+      container.innerHTML = `
+        <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+        <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+        <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+        <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+      `;
+
+      try {
+        const res = await fetch('/api/home');
+        const data = await res.json();
+        
+        container.innerHTML = '';
+        data.trending.forEach((track) => {
+          const card = document.createElement('div');
+          card.className = "glass-card p-2.5 rounded-2xl flex flex-col gap-2 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
+          card.onclick = () => playTrackFromList(track, data.trending);
+          card.innerHTML = `
+            <div class="relative w-full aspect-square rounded-xl overflow-hidden bg-black/40">
+              <img src="${track.thumbnail}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" alt="thumb" loading="lazy">
+              <!-- Play overlay -->
+              <button class="absolute bottom-2 right-2 w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center opacity-90 shadow-lg">
+                <svg class="w-4 h-4 fill-current ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              </button>
+              <!-- Add to playlist trigger -->
+              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(track)})" class="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 backdrop-blur-md text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow" title="Add to Playlist">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              </button>
+            </div>
+            <div class="min-w-0">
+              <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
+              <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
+            </div>
+          `;
+          container.appendChild(card);
+        });
+
+        const moodsContainer = document.getElementById('moods-container');
+        moodsContainer.innerHTML = '';
+        data.moods.forEach(m => {
+          const pill = document.createElement('button');
+          pill.className = "px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 active:bg-indigo-600/30 text-xs font-medium text-gray-300 whitespace-nowrap transition border border-white/5";
+          pill.innerText = m.title;
+          pill.onclick = () => loadMoodPlaylists(m.params, m.title);
+          moodsContainer.appendChild(pill);
+        });
+
+      } catch (e) {
+        container.innerHTML = `<div class="col-span-full py-8 text-center text-gray-400 text-sm">Failed to load trending. Tap refresh.</div>`;
+      }
+    }
+
+    async function loadMoodPlaylists(params, title) {
+      const plContainer = document.getElementById('mood-playlists-container');
+      plContainer.classList.remove('hidden');
+      plContainer.innerHTML = '<div class="col-span-full py-6 text-center text-gray-400 text-sm">Loading curated playlists...</div>';
+
+      try {
+        const res = await fetch(`/api/mood-playlists?params=${encodeURIComponent(params)}`);
+        const data = await res.json();
+        plContainer.innerHTML = '';
+        data.playlists.forEach(pl => {
+          const card = document.createElement('div');
+          card.className = "glass-card p-2.5 rounded-2xl flex flex-col gap-2 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer";
+          card.onclick = () => openPlaylist(pl.id, false);
+          card.innerHTML = `
+            <div class="w-full aspect-square rounded-xl overflow-hidden bg-black/40">
+              <img src="${pl.thumbnail}" class="w-full h-full object-cover" alt="pl" loading="lazy">
+            </div>
+            <div class="min-w-0">
+              <div class="text-sm font-semibold text-white line-clamp-1">${pl.title}</div>
+              <div class="text-xs text-gray-400 line-clamp-1">${pl.count || 'Playlist'}</div>
+            </div>
+          `;
+          plContainer.appendChild(card);
+        });
+      } catch (e) {
+        plContainer.innerHTML = '<div class="col-span-full text-center text-red-400 text-xs">Failed to load playlists.</div>';
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Search
+    // -------------------------------------------------------------
+    function setSearchFilter(filter) {
+      currentSearchFilter = filter;
+      document.getElementById('filter-songs').className = filter === 'songs' 
+        ? "px-3.5 py-1.5 rounded-full bg-indigo-600 text-white font-medium transition" 
+        : "px-3.5 py-1.5 rounded-full bg-white/10 text-gray-300 font-medium transition";
+      document.getElementById('filter-playlists').className = filter === 'playlists' 
+        ? "px-3.5 py-1.5 rounded-full bg-indigo-600 text-white font-medium transition" 
+        : "px-3.5 py-1.5 rounded-full bg-white/10 text-gray-300 font-medium transition";
+      performSearch();
+    }
+
+    async function performSearch() {
+      const q = document.getElementById('search-input').value.trim();
+      if (!q) return;
+      const resContainer = document.getElementById('search-results');
+      resContainer.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Searching...</div>';
+
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&filter_type=${currentSearchFilter}`);
+        const data = await res.json();
+        resContainer.innerHTML = '';
+
+        if (!data.results || data.results.length === 0) {
+          resContainer.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">No results found.</div>';
+          return;
+        }
+
+        data.results.forEach(item => {
+          const row = document.createElement('div');
+          row.className = "glass-card p-2.5 rounded-xl flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer";
+          
+          if (item.type === 'playlist') {
+            row.onclick = () => openPlaylist(item.id, false);
+            row.innerHTML = `
+              <img src="${item.thumbnail}" class="w-12 h-12 rounded-lg object-cover" alt="thumb">
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-semibold text-white line-clamp-1">${item.title}</div>
+                <div class="text-xs text-gray-400 line-clamp-1">Playlist • ${item.artist}</div>
+              </div>
+              <span class="text-xs text-indigo-400 px-2.5 py-1 bg-white/5 rounded-lg">View</span>
+            `;
+          } else {
+            const isLiked = userLikedTrackIds.has(item.id);
+            row.onclick = () => playTrackFromList(item, data.results.filter(r => r.type === 'song'));
+            row.innerHTML = `
+              <img src="${item.thumbnail}" class="w-12 h-12 rounded-lg object-cover" alt="thumb">
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-semibold text-white line-clamp-1">${item.title}</div>
+                <div class="text-xs text-gray-400 line-clamp-1">${item.artist} • ${item.duration}</div>
+              </div>
+              <div class="flex items-center gap-1">
+                <!-- Like -->
+                <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(item)}, event)" class="p-2 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
+                  <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+                </button>
+                <!-- Add to playlist -->
+                <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(item)})" class="p-2 text-gray-400 hover:text-white" title="Add to Playlist">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                </button>
+                <!-- Download -->
+                <button onclick="event.stopPropagation(); downloadSingleTrack('${item.id}', '${escapeQuotes(item.title)}', '${escapeQuotes(item.artist)}')" class="p-2 text-gray-400 hover:text-white" title="Download">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                </button>
+              </div>
+            `;
+          }
+          resContainer.appendChild(row);
+        });
+      } catch (e) {
+        resContainer.innerHTML = '<div class="text-center py-10 text-red-400 text-sm">Search failed.</div>';
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Playlist View (Both YouTube, User Custom & Device Offline Playlists)
+    // -------------------------------------------------------------
+    async function openPlaylist(playlistId, isUserPlaylist = false) {
+      activePlaylistId = playlistId;
+      activePlaylistIsUser = isUserPlaylist;
+      switchTab('playlist');
+      const trackList = document.getElementById('playlist-tracks-container');
+      trackList.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Loading playlist tracks...</div>';
+
+      const customBadge = document.getElementById('pl-custom-badge');
+      const deleteBtn = document.getElementById('pl-delete-btn');
+      const isSystemVirtual = playlistId.startsWith('user_pl_offline') || playlistId.startsWith('user_pl_liked');
+      if (isUserPlaylist && !isSystemVirtual) {
+        customBadge.classList.remove('hidden');
+        deleteBtn.classList.remove('hidden');
+      } else {
+        customBadge.classList.add('hidden');
+        deleteBtn.classList.add('hidden');
+      }
+
+      // Handle Device-Stored Offline Songs Playlist
+      if (playlistId === 'user_pl_offline_downloads') {
+        const offlineTracks = await SpotiDB.getAllTracks();
+        document.getElementById('pl-title').innerText = "Downloaded Songs";
+        document.getElementById('pl-desc').innerText = `${offlineTracks.length} tracks saved on this device (offline)`;
+        document.getElementById('pl-cover').src = (offlineTracks.length > 0 && offlineTracks[0].thumbnail) ? offlineTracks[0].thumbnail : "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80";
+
+        trackList.innerHTML = '';
+        if (offlineTracks.length === 0) {
+          trackList.innerHTML = '<div class="text-center py-12 text-gray-500 text-xs">No songs downloaded on this device yet.<br><span class="text-gray-600 block mt-1">Tap ⬇️ on any song to save it directly to your phone.</span></div>';
+          return;
+        }
+
+        offlineTracks.forEach((t, i) => {
+          const isLiked = userLikedTrackIds.has(t.id);
+          const row = document.createElement('div');
+          row.className = "glass-card p-2.5 rounded-xl flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer";
+          row.onclick = () => playTrackFromList(t, offlineTracks);
+          row.innerHTML = `
+            <span class="text-xs font-mono text-gray-500 w-4">${i + 1}</span>
+            <img src="${t.thumbnail || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'}" class="w-10 h-10 rounded-lg object-cover" alt="thumb">
+            <div class="min-w-0 flex-1">
+              <div class="text-sm font-semibold text-white line-clamp-1">${t.title}</div>
+              <div class="text-xs text-gray-400 line-clamp-1">${t.artist} • ${t.sizeFormatted || 'Offline'}</div>
+            </div>
+            <div class="flex items-center gap-1">
+              <!-- Like -->
+              <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(t)}, event)" class="p-1.5 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
+                <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+              </button>
+              <!-- Add to another playlist -->
+              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(t)})" class="p-1.5 text-gray-400 hover:text-white" title="Add to Playlist">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              </button>
+              <!-- Delete from Device -->
+              <button onclick="event.stopPropagation(); deleteOfflineTrack('${t.id}', '${escapeQuotes(t.title)}')" class="p-1.5 text-red-400 hover:text-red-300" title="Delete from Device">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              </button>
+            </div>
+          `;
+          trackList.appendChild(row);
+        });
+        return;
+      }
+
+      try {
+        const res = await authFetch(`/api/playlist/${playlistId}`);
+        const data = await res.json();
+        document.getElementById('pl-title').innerText = data.title;
+        document.getElementById('pl-desc').innerText = data.description || `${data.tracks.length} tracks`;
+        document.getElementById('pl-cover').src = data.thumbnail;
+
+        trackList.innerHTML = '';
+        if (data.tracks.length === 0) {
+          trackList.innerHTML = '<div class="text-center py-12 text-gray-500 text-xs">This playlist is empty. Add songs to it from Explore or Search!</div>';
+          return;
+        }
+
+        data.tracks.forEach((t, i) => {
+          const isLiked = userLikedTrackIds.has(t.id);
+          const row = document.createElement('div');
+          row.className = "glass-card p-2.5 rounded-xl flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer";
+          row.onclick = () => playTrackFromList(t, data.tracks);
+          row.innerHTML = `
+            <span class="text-xs font-mono text-gray-500 w-4">${i + 1}</span>
+            <img src="${t.thumbnail}" class="w-10 h-10 rounded-lg object-cover" alt="thumb">
+            <div class="min-w-0 flex-1">
+              <div class="text-sm font-semibold text-white line-clamp-1">${t.title}</div>
+              <div class="text-xs text-gray-400 line-clamp-1">${t.artist}</div>
+            </div>
+            <div class="flex items-center gap-1">
+              <!-- Like -->
+              <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(t)}, event)" class="p-1.5 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
+                <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+              </button>
+              <!-- Add to another playlist -->
+              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(t)})" class="p-1.5 text-gray-400 hover:text-white" title="Add to Playlist">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              </button>
+              <!-- Download -->
+              <button onclick="event.stopPropagation(); downloadSingleTrack('${t.id}', '${escapeQuotes(t.title)}', '${escapeQuotes(t.artist)}')" class="p-1.5 text-gray-400 hover:text-white" title="Download">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              </button>
+              ${isUserPlaylist && !isSystemVirtual ? `
+                <button onclick="removeTrackFromCustomPlaylist('${playlistId}', '${t.id}', event)" class="p-1.5 text-red-400 hover:text-red-300" title="Remove from Playlist">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+              ` : ''}
+            </div>
+          `;
+          trackList.appendChild(row);
+        });
+
+      } catch (e) {
+        trackList.innerHTML = '<div class="text-center py-10 text-red-400 text-sm">Failed to load playlist tracks.</div>';
+      }
+    }
+
+    async function playEntirePlaylist() {
+      try {
+        if (activePlaylistId === 'user_pl_offline_downloads') {
+          const offlineTracks = await SpotiDB.getAllTracks();
+          if (offlineTracks.length > 0) {
+            playTrackFromList(offlineTracks[0], offlineTracks);
+          }
+          return;
+        }
+        const res = await authFetch(`/api/playlist/${activePlaylistId}`);
+        const data = await res.json();
+        if (data.tracks && data.tracks.length > 0) {
+          playTrackFromList(data.tracks[0], data.tracks);
+        }
+      } catch (e) {
+        showToast("Failed to play playlist");
+      }
+    }
+
+    async function downloadAllPlaylistTracks() {
+      const btn = document.getElementById('pl-download-all-btn');
+      btn.innerText = 'Queuing...';
+      try {
+        if (activePlaylistId === 'user_pl_offline_downloads') {
+          showToast("These tracks are already saved on your phone!");
+          btn.innerText = '⬇️ Download All';
+          return;
+        }
+        const res = await authFetch(`/api/playlist/${activePlaylistId}`);
+        const data = await res.json();
+        const tracks = data.tracks || [];
+        let count = 0;
+        for (const t of tracks) {
+          const exists = await SpotiDB.getTrack(t.id);
+          if (!exists) {
+            downloadSingleTrack(t.id, t.title, t.artist);
+            count++;
+          }
+        }
+        btn.innerText = `✓ Queued ${count}`;
+        showToast(`Queued ${count} tracks for offline download`);
+        setTimeout(() => { btn.innerText = '⬇️ Download All'; }, 3000);
+      } catch (e) {
+        btn.innerText = 'Failed';
+        setTimeout(() => { btn.innerText = '⬇️ Download All'; }, 3000);
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Library (Device-Stored Offline Songs)
+    // -------------------------------------------------------------
+    async function loadLibrary() {
+      const container = document.getElementById('library-container');
+      container.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Loading songs saved on device...</div>';
+
+      try {
+        const tracks = await SpotiDB.getAllTracks();
+        container.innerHTML = '';
+        const countEl = document.getElementById('offline-songs-count');
+        if (countEl) countEl.innerText = tracks.length;
+
+        if (!tracks || tracks.length === 0) {
+          container.innerHTML = `
+            <div class="text-center py-16 text-gray-500 text-sm">
+              No offline songs downloaded yet on this device.<br>
+              <span class="text-xs text-gray-600 mt-1 block">Tap ⬇️ on any song to save it directly to your phone for offline playback.</span>
+            </div>
+          `;
+          return;
+        }
+
+        tracks.forEach(track => {
+          const isLiked = userLikedTrackIds.has(track.id);
+          const row = document.createElement('div');
+          row.className = "glass-card p-3 rounded-2xl flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer";
+          row.onclick = () => playTrackFromList(track, tracks);
+          row.innerHTML = `
+            <div class="w-11 h-11 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-400 shrink-0 overflow-hidden">
+              ${track.thumbnail ? `<img src="${track.thumbnail}" class="w-full h-full object-cover">` : `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>`}
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
+              <div class="text-xs text-gray-400 line-clamp-1">${track.artist} • ${track.sizeFormatted || 'Offline'}</div>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <!-- Add to Playlist -->
+              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(track)})" class="p-1.5 text-gray-400 hover:text-white" title="Add to Playlist">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              </button>
+              <!-- Delete from Device -->
+              <button onclick="event.stopPropagation(); deleteOfflineTrack('${track.id}', '${escapeQuotes(track.title)}')" class="p-1.5 text-red-400 hover:text-red-300" title="Delete from Device">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              </button>
+              <span class="text-xs text-emerald-400 font-medium px-2 py-0.5 bg-emerald-500/10 rounded-md">On Phone</span>
+            </div>
+          `;
+          container.appendChild(row);
+        });
+
+      } catch (e) {
+        container.innerHTML = '<div class="text-center py-10 text-red-400 text-sm">Failed to load offline songs on device.</div>';
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Audio Playback Engine & Queue
+    // -------------------------------------------------------------
+    async function playTrackFromList(track, trackList = []) {
+      currentTrack = track;
+      queue = [...trackList];
+      queueIndex = queue.findIndex(t => t.id === track.id);
+      if (queueIndex === -1) queueIndex = 0;
+
+      await loadAndPlayTrack(track);
+      fetchRadioRecommendations(track.id);
+    }
+
+    async function loadAndPlayTrack(track) {
+      updateUIForTrack(track);
+
+      try {
+        // 1. Check if track is saved in phone IndexedDB
+        let blob = track.blob;
+        if (!blob) {
+          const offline = await SpotiDB.getTrack(track.id);
+          if (offline && offline.blob) {
+            blob = offline.blob;
+          }
+        }
+
+        if (blob) {
+          // Play directly from phone memory with zero network latency
+          if (currentBlobUrl) {
+            try { URL.revokeObjectURL(currentBlobUrl); } catch (err) {}
+            currentBlobUrl = null;
+          }
+          currentBlobUrl = URL.createObjectURL(blob);
+          audio.src = currentBlobUrl;
+        } else if (track.is_local) {
+          audio.src = track.url;
+        } else {
+          // Stream online from server
+          const res = await fetch(`/api/stream/${track.id}`);
+          const data = await res.json();
+          audio.src = data.url;
+        }
+
+        audio.play().then(() => {
+          isPlaying = true;
+          updatePlayPauseIcons(true);
+        }).catch(err => {
+          console.warn("Playback error:", err);
+          updatePlayPauseIcons(false);
+        });
+
+      } catch (e) {
+        console.error("Playback error:", e);
+      }
+    }
+
+    function updateUIForTrack(track) {
+      document.getElementById('mini-player').classList.remove('hidden');
+      document.getElementById('mini-title').innerText = track.title;
+      document.getElementById('mini-artist').innerText = track.artist;
+      document.getElementById('mini-thumb').src = track.thumbnail;
+
+      document.getElementById('drawer-title').innerText = track.title;
+      document.getElementById('drawer-artist').innerText = track.artist;
+      document.getElementById('drawer-thumb').src = track.thumbnail;
+      document.getElementById('drawer-dl-badge').innerText = track.is_local ? 'Offline MP3' : 'Streaming';
+
+      updateMediaSession(track);
+    }
+
+    function togglePlayPause() {
+      if (!audio.src) return;
+      if (audio.paused) {
+        audio.play();
+        isPlaying = true;
+      } else {
+        audio.pause();
+        isPlaying = false;
+      }
+      updatePlayPauseIcons(!audio.paused);
+    }
+
+    function updatePlayPauseIcons(playing) {
+      const miniIcon = document.getElementById('mini-play-icon');
+      const drawerIcon = document.getElementById('drawer-play-icon');
+      if (playing) {
+        miniIcon.innerHTML = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
+        drawerIcon.innerHTML = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
+      } else {
+        miniIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+        drawerIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+      }
+    }
+
+    function playNext() {
+      if (queue.length === 0) return;
+      if (isShuffle) {
+        queueIndex = Math.floor(Math.random() * queue.length);
+      } else {
+        queueIndex = (queueIndex + 1) % queue.length;
+      }
+      loadAndPlayTrack(queue[queueIndex]);
+    }
+
+    function playPrev() {
+      if (audio.currentTime > 3) {
+        audio.currentTime = 0;
+        return;
+      }
+      if (queue.length === 0) return;
+      queueIndex = (queueIndex - 1 + queue.length) % queue.length;
+      loadAndPlayTrack(queue[queueIndex]);
+    }
+
+    function toggleShuffle() {
+      isShuffle = !isShuffle;
+      document.getElementById('shuffle-btn').classList.toggle('text-indigo-400', isShuffle);
+    }
+
+    function toggleRepeat() {
+      repeatMode = (repeatMode + 1) % 3;
+      const btn = document.getElementById('repeat-btn');
+      if (repeatMode === 0) {
+        btn.className = "text-gray-400 hover:text-white p-2";
+      } else if (repeatMode === 1) {
+        btn.className = "text-indigo-400 font-bold p-2";
+      } else {
+        btn.className = "text-purple-400 font-bold p-2";
+      }
+    }
+
+    function setupAudioEvents() {
+      audio.addEventListener('timeupdate', () => {
+        if (!isSeeking && audio.duration) {
+          const pct = (audio.currentTime / audio.duration) * 100;
+          document.getElementById('seek-slider').value = pct;
+          document.getElementById('current-time').innerText = formatTime(audio.currentTime);
+          document.getElementById('total-duration').innerText = formatTime(audio.duration);
+        }
+      });
+
+      audio.addEventListener('ended', () => {
+        if (repeatMode === 2) {
+          audio.currentTime = 0;
+          audio.play();
+        } else {
+          playNext();
+        }
+      });
+
+      audio.addEventListener('play', () => updatePlayPauseIcons(true));
+      audio.addEventListener('pause', () => updatePlayPauseIcons(false));
+    }
+
+    function onSeekInput() {
+      isSeeking = true;
+      const pct = document.getElementById('seek-slider').value;
+      if (audio.duration) {
+        document.getElementById('current-time').innerText = formatTime((pct / 100) * audio.duration);
+      }
+    }
+
+    function onSeekChange() {
+      const pct = document.getElementById('seek-slider').value;
+      if (audio.duration) {
+        audio.currentTime = (pct / 100) * audio.duration;
+      }
+      isSeeking = false;
+    }
+
+    function formatTime(secs) {
+      if (isNaN(secs)) return '0:00';
+      const m = Math.floor(secs / 60);
+      const s = Math.floor(secs % 60);
+      return `${m}:${s < 10 ? '0' : ''}${s}`;
+    }
+
+    async function fetchRadioRecommendations(videoId) {
+      try {
+        const res = await fetch(`/api/radio/${videoId}`);
+        const data = await res.json();
+        if (data.tracks && data.tracks.length > 0) {
+          const existingIds = new Set(queue.map(t => t.id));
+          const newTracks = data.tracks.filter(t => !existingIds.has(t.id));
+          queue = queue.concat(newTracks);
+          renderDrawerQueue();
+        }
+      } catch (e) {
+        console.error('Radio error:', e);
+      }
+    }
+
+    function renderDrawerQueue() {
+      const container = document.getElementById('drawer-queue-container');
+      const countEl = document.getElementById('queue-count');
+      const upcoming = queue.slice(queueIndex + 1);
+      countEl.innerText = `${upcoming.length} up next`;
+      container.innerHTML = '';
+
+      upcoming.slice(0, 15).forEach((t) => {
+        const row = document.createElement('div');
+        row.className = "flex items-center justify-between p-2 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer text-xs";
+        row.onclick = () => {
+          queueIndex = queue.findIndex(item => item.id === t.id);
+          loadAndPlayTrack(t);
+        };
+        row.innerHTML = `
+          <div class="flex items-center gap-2.5 min-w-0 flex-1">
+            <img src="${t.thumbnail}" class="w-8 h-8 rounded-lg object-cover" alt="art">
+            <div class="min-w-0 flex-1">
+              <div class="font-medium text-white line-clamp-1">${t.title}</div>
+              <div class="text-[11px] text-gray-400 line-clamp-1">${t.artist}</div>
+            </div>
+          </div>
+          <span class="text-gray-500 font-mono text-[10px] pl-2">${t.duration || ''}</span>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    function setupMediaSession() {
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.setActionHandler('play', () => { audio.play(); });
+        navigator.mediaSession.setActionHandler('pause', () => { audio.pause(); });
+        navigator.mediaSession.setActionHandler('previoustrack', () => { playPrev(); });
+        navigator.mediaSession.setActionHandler('nexttrack', () => { playNext(); });
+        navigator.mediaSession.setActionHandler('seekto', (details) => {
+          if (details.seekTime && audio.duration) {
+            audio.currentTime = details.seekTime;
+          }
+        });
+      }
+    }
+
+    function updateMediaSession(track) {
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: track.title,
+          artist: track.artist,
+          album: track.album || "Private Music",
+          artwork: [
+            { src: track.thumbnail, sizes: '96x96', type: 'image/jpeg' },
+            { src: track.thumbnail, sizes: '128x128', type: 'image/jpeg' },
+            { src: track.thumbnail, sizes: '256x256', type: 'image/jpeg' },
+            { src: track.thumbnail, sizes: '512x512', type: 'image/jpeg' }
+          ]
+        });
+      }
+    }
+
+    function downloadCurrentTrack() {
+      if (!currentTrack) return;
+      downloadSingleTrack(currentTrack.id, currentTrack.title, currentTrack.artist);
+    }
+
+    async function downloadSingleTrack(id, title, artist) {
+      // 1. Check if already in device IndexedDB
+      const existing = await SpotiDB.getTrack(id);
+      if (existing) {
+        showToast(`✓ "${title}" is already saved on this phone!`);
+        return;
+      }
+
+      showToast(`⬇️ Preparing "${title}" on server...`);
+      try {
+        await fetch(`/api/download/${id}?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`, { method: 'POST' });
+        showToast(`⏳ Downloading "${title}" on server...`);
+        
+        // Poll status until download completes on iPhone 7 server
+        let pollCount = 0;
+        const poller = setInterval(async () => {
+          pollCount++;
+          try {
+            const res = await fetch('/api/downloads/status');
+            const data = await res.json();
+            const info = data && data[id];
+            if (info) {
+              if (info.status === 'ready_for_transfer' || info.status === 'completed') {
+                clearInterval(poller);
+                showToast(`📲 Transferring "${title}" to your phone...`);
+                
+                // Fetch binary audio stream from server (iPhone 7 will auto-delete file immediately after delivery)
+                const fileRes = await fetch(`/api/download/file/${id}`);
+                if (!fileRes.ok) throw new Error("File transfer failed from server");
+                const blob = await fileRes.blob();
+
+                // Save to phone IndexedDB
+                const trackRecord = {
+                  id: id,
+                  title: title || (currentTrack && currentTrack.id === id ? currentTrack.title : id),
+                  artist: artist || (currentTrack && currentTrack.id === id ? currentTrack.artist : 'Unknown Artist'),
+                  duration: (currentTrack && currentTrack.id === id ? currentTrack.duration : '--:--'),
+                  thumbnail: (currentTrack && currentTrack.id === id ? currentTrack.thumbnail : 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'),
+                  album: (currentTrack && currentTrack.id === id ? currentTrack.album : ''),
+                  blob: blob,
+                  sizeFormatted: (blob.size / (1024 * 1024)).toFixed(1) + ' MB'
+                };
+                await SpotiDB.saveTrack(trackRecord);
+
+                showToast(`🎉 "${title}" saved to your phone! Server space cleared.`);
+                if (typeof loadLibrary === 'function') loadLibrary();
+                if (typeof loadUserPlaylists === 'function') loadUserPlaylists();
+                if (activePlaylistId === 'user_pl_offline_downloads') {
+                  openPlaylist('user_pl_offline_downloads', true);
+                }
+              } else if (info.status === 'error') {
+                clearInterval(poller);
+                showToast(`⚠️ Download error: ${info.error || 'Failed'}`);
+              }
+            }
+          } catch (e) {
+            console.error("Poll/transfer error:", e);
+          }
+          if (pollCount > 60) {
+            clearInterval(poller);
+            showToast("Download timed out. Please try again.");
+          }
+        }, 2000);
+      } catch (e) {
+        showToast(`Download error: ${e.message}`);
+      }
+    }
+
+    async function deleteOfflineTrack(id, title) {
+      if (confirm(`Remove "${title}" from this device's offline storage?`)) {
+        await SpotiDB.deleteTrack(id);
+        showToast(`🗑️ Removed "${title}" from this device`);
+        if (activePlaylistId === 'user_pl_offline_downloads') {
+          openPlaylist('user_pl_offline_downloads', true);
+        }
+        loadLibrary();
+        loadUserPlaylists();
+      }
+    }
+
+    function showToast(msg) {
+      const toast = document.createElement('div');
+      toast.className = "fixed top-5 left-1/2 -translate-x-1/2 bg-indigo-600/90 backdrop-blur-md text-white px-4 py-2 rounded-2xl text-xs font-semibold shadow-2xl z-50 border border-white/10 animate-bounce";
+      toast.innerText = msg;
+      document.body.appendChild(toast);
+      setTimeout(() => { toast.remove(); }, 3500);
+    }
+
+    function openNowPlayingDrawer() {
+      document.getElementById('now-playing-drawer').classList.remove('translate-y-full');
+      renderDrawerQueue();
+    }
+
+    function closeNowPlayingDrawer() {
+      document.getElementById('now-playing-drawer').classList.add('translate-y-full');
+    }
+
+    function openQrModal() {
+      document.getElementById('qr-modal').classList.remove('hidden');
+    }
+
+    function closeQrModal() {
+      document.getElementById('qr-modal').classList.add('hidden');
+    }
+
+    function escapeQuotes(str) {
+      if (!str) return '';
+      return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    }
+
+    function escapeTrackObj(t) {
+      const copy = {
+        id: t.id,
+        title: t.title,
+        artist: t.artist,
+        duration: t.duration || '',
+        thumbnail: t.thumbnail || '',
+        album: t.album || ''
+      };
+      return JSON.stringify(copy).replace(/"/g, '&quot;');
+    }
+  </script>
+</body>
+</html>
