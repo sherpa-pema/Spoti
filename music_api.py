@@ -93,6 +93,67 @@ def get_trending_tracks(limit: int = 25) -> List[Dict[str, Any]]:
     return tracks[:limit]
 
 
+def get_new_releases(limit: int = 20) -> List[Dict[str, Any]]:
+    """Fetches new release tracks from YouTube Music."""
+    ytm = get_ytm()
+    tracks: List[Dict[str, Any]] = []
+
+    try:
+        results = ytm.search("new releases songs", filter="songs", limit=limit)
+        for t in results:
+            vid = t.get("videoId")
+            if vid:
+                tracks.append({
+                    "id": vid,
+                    "title": t.get("title", "Unknown Title"),
+                    "artist": _format_artists(t.get("artists")),
+                    "album": t.get("album", {}).get("name") if isinstance(t.get("album"), dict) else (t.get("album") or ""),
+                    "duration": t.get("duration", "--:--"),
+                    "thumbnail": _get_best_thumbnail(t.get("thumbnails")),
+                })
+    except Exception as e:
+        print(f"Error fetching new releases: {e}")
+
+    return tracks[:limit]
+
+
+def get_featured_playlists(limit: int = 10) -> List[Dict[str, Any]]:
+    """Fetches popular / chart playlists (Today's Top Hits, Viral Hits, etc.)."""
+    ytm = get_ytm()
+    playlists: List[Dict[str, Any]] = []
+
+    try:
+        results = ytm.search("today top hits", filter="playlists", limit=limit)
+        for p in results:
+            pl_id = p.get("browseId") or p.get("playlistId")
+            if pl_id:
+                playlists.append({
+                    "id": pl_id,
+                    "type": "playlist",
+                    "title": p.get("title", "Untitled Playlist"),
+                    "artist": p.get("author", "YouTube Music"),
+                    "count": p.get("itemCount", ""),
+                    "thumbnail": _get_best_thumbnail(p.get("thumbnails")),
+                })
+    except Exception as e:
+        print(f"Error fetching featured playlists: {e}")
+
+    return playlists[:limit]
+
+
+def get_search_suggestions(query: str) -> List[str]:
+    """Fetches real-time search autocomplete suggestions for user input."""
+    if not query or not query.strip():
+        return []
+    ytm = get_ytm()
+    try:
+        suggestions = ytm.get_search_suggestions(query.strip())
+        return suggestions if isinstance(suggestions, list) else []
+    except Exception as e:
+        print(f"Error getting search suggestions: {e}")
+        return []
+
+
 def get_moods_and_genres() -> Dict[str, List[Dict[str, str]]]:
     """Fetches mood and genre categories."""
     ytm = get_ytm()

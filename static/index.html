@@ -167,7 +167,7 @@
     
     <!-- TAB: HOME / EXPLORE -->
     <section id="tab-home" class="space-y-6">
-      <!-- Trending Carousel / Cards -->
+      <!-- 1. Trending Hits -->
       <div>
         <div class="flex items-center justify-between mb-3">
           <h2 class="text-lg font-bold text-white flex items-center gap-2">
@@ -183,10 +183,38 @@
         </div>
       </div>
 
-      <!-- Moods & Genres -->
+      <!-- 2. New Releases -->
+      <div>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <span>✨</span> New Releases
+          </h2>
+          <span class="text-xs text-gray-400">Fresh tracks</span>
+        </div>
+        <div id="new-releases-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5">
+          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+        </div>
+      </div>
+
+      <!-- 3. Top Charts & Featured Playlists -->
+      <div>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <span>🏆</span> Top Charts & Playlists
+          </h2>
+          <span class="text-xs text-gray-400">Curated collections</span>
+        </div>
+        <div id="featured-playlists-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5">
+          <div class="h-32 rounded-xl bg-white/5 animate-pulse"></div>
+          <div class="h-32 rounded-xl bg-white/5 animate-pulse"></div>
+        </div>
+      </div>
+
+      <!-- 4. Moods & Genres -->
       <div>
         <h2 class="text-lg font-bold text-white mb-3 flex items-center gap-2">
-          <span>✨</span> Moods & Genres
+          <span>🎧</span> Moods & Genres
         </h2>
         <div id="moods-container" class="flex gap-2 overflow-x-auto pb-2 scrollbar-none"></div>
         <div id="mood-playlists-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5 mt-3 hidden"></div>
@@ -195,17 +223,23 @@
 
     <!-- TAB: SEARCH -->
     <section id="tab-search" class="space-y-4 hidden">
-      <div class="relative">
+      <div class="relative" id="search-input-wrapper">
         <input 
           type="search" 
           id="search-input" 
           placeholder="Search songs, artists, playlists..." 
           class="w-full bg-white/10 text-white placeholder-gray-400 px-4 py-3 pl-11 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 transition text-sm"
-          onkeydown="if(event.key==='Enter') performSearch()"
+          onkeydown="handleSearchKeydown(event)"
+          oninput="onSearchInput(this.value)"
+          autocomplete="off"
         />
-        <svg class="w-5 h-5 text-gray-400 absolute left-3.5 top-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-5 h-5 text-gray-400 absolute left-3.5 top-3.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
+
+        <!-- Dropdown Suggestions Container -->
+        <div id="search-suggestions-dropdown" class="hidden absolute left-0 right-0 top-full mt-1.5 bg-[#161a26]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-40 max-h-64 overflow-y-auto divide-y divide-white/5">
+        </div>
       </div>
 
       <div class="flex gap-2 text-xs">
@@ -316,12 +350,8 @@
         <button id="mini-like-btn" onclick="toggleLikeCurrentTrack()" class="p-2 text-gray-400 hover:text-red-400" title="Like Song">
           <svg id="mini-like-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
         </button>
-        <!-- Add to Playlist button on mini player -->
-        <button onclick="promptAddToPlaylist(currentTrack)" class="p-2 text-gray-400 hover:text-white" title="Add to Playlist">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-        </button>
-        <!-- Download button -->
-        <button id="mini-dl-btn" onclick="downloadCurrentTrack()" class="p-2 text-gray-300 hover:text-white" title="Download MP3">
+        <!-- Download / Add to Playlist button -->
+        <button id="mini-dl-btn" onclick="promptDownloadTrack(currentTrack)" class="p-2 text-gray-300 hover:text-white" title="Download / Add to Playlist">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
         </button>
         <!-- Play / Pause -->
@@ -366,10 +396,7 @@
         <button id="drawer-like-btn" onclick="toggleLikeCurrentTrack()" class="p-2 text-gray-400 hover:text-red-400 rounded-full bg-white/5" title="Like Song">
           <svg id="drawer-like-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
         </button>
-        <button onclick="promptAddToPlaylist(currentTrack)" class="p-2 text-gray-400 hover:text-white rounded-full bg-white/5" title="Add to Playlist">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-        </button>
-        <button onclick="downloadCurrentTrack()" class="p-2 text-gray-400 hover:text-white rounded-full bg-white/5" title="Download MP3">
+        <button onclick="promptDownloadTrack(currentTrack)" class="p-2 text-gray-400 hover:text-white rounded-full bg-white/5" title="Download / Add to Playlist">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
         </button>
       </div>
@@ -491,25 +518,42 @@
   <!-- ============================================================ -->
   <!-- 8. Add Track to Playlist Modal -->
   <!-- ============================================================ -->
+  <!-- 8. Download & Save to Playlist Modal -->
+  <!-- ============================================================ -->
   <div id="add-to-playlist-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 hidden" onclick="closeAddToPlaylistModal()">
     <div class="bg-[#181924] border border-white/10 rounded-t-3xl sm:rounded-3xl p-5 max-w-sm w-full space-y-3.5 max-h-[80vh] flex flex-col" onclick="event.stopPropagation()">
       <div class="flex items-center justify-between">
-        <div>
-          <h3 class="text-base font-bold text-white">Add to Playlist</h3>
-          <p id="add-modal-song-title" class="text-xs text-indigo-400 line-clamp-1 mt-0.5">Song Name</p>
+        <div class="flex items-center gap-2.5 min-w-0 pr-2">
+          <div class="w-8 h-8 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          </div>
+          <div class="min-w-0">
+            <h3 class="text-base font-bold text-white leading-tight">Download & Save</h3>
+            <p id="add-modal-song-title" class="text-xs text-indigo-400 line-clamp-1 mt-0.5">Song Name</p>
+          </div>
         </div>
-        <button onclick="closeAddToPlaylistModal()" class="p-1.5 text-gray-400 hover:text-white rounded-full bg-white/5">
+        <button onclick="closeAddToPlaylistModal()" class="p-1.5 text-gray-400 hover:text-white rounded-full bg-white/5 shrink-0">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
 
-      <!-- Quick create new playlist shortcut -->
-      <button onclick="openCreatePlaylistModal(true)" class="w-full p-2.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-medium flex items-center justify-center gap-1.5 transition">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-        <span>Create New Playlist</span>
+      <!-- Quick Option: Download directly to Phone (Downloaded Songs) -->
+      <button onclick="confirmQuickDownload()" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-xs font-medium flex items-center justify-between transition active:scale-[0.98]">
+        <div class="flex items-center gap-2">
+          <span>📲</span>
+          <span>Download to Phone Only</span>
+        </div>
+        <span class="text-[11px] text-indigo-400 font-semibold">Downloaded Songs</span>
       </button>
 
-      <!-- List of User's Playlists -->
+      <!-- Quick Option: Create New Playlist -->
+      <button onclick="openCreatePlaylistModal(true)" class="w-full p-2.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-medium flex items-center justify-center gap-1.5 transition active:scale-[0.98]">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        <span>Create New Playlist & Save</span>
+      </button>
+
+      <!-- Existing Playlists List Header -->
+      <div class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1 pt-1">Or Add to Existing Playlist</div>
       <div id="add-modal-playlists-list" class="space-y-2 overflow-y-auto flex-1 pr-1">
         <!-- Injected dynamically -->
       </div>
@@ -1215,18 +1259,29 @@
       }
     }
 
-    // Modal: Add Track to Playlist
-    function promptAddToPlaylist(track) {
+    // -------------------------------------------------------------
+    // Unified Download & Add to Playlist Modal
+    // -------------------------------------------------------------
+    function promptDownloadTrack(track) {
       if (!track) return;
-      if (!currentUser) {
-        showToast("Please log in to add songs to playlists");
-        openAuthModal('login');
-        return;
-      }
       trackPendingAddToPlaylist = track;
-      document.getElementById('add-modal-song-title').innerText = track.title;
+      const titleEl = document.getElementById('add-modal-song-title');
+      if (titleEl) {
+        titleEl.innerText = `${track.title} • ${track.artist || 'Unknown'}`;
+      }
       renderAddToPlaylistList();
       document.getElementById('add-to-playlist-modal').classList.remove('hidden');
+    }
+
+    // Alias for backwards compatibility
+    const promptAddToPlaylist = promptDownloadTrack;
+
+    function confirmQuickDownload() {
+      if (!trackPendingAddToPlaylist) return;
+      const t = trackPendingAddToPlaylist;
+      closeAddToPlaylistModal();
+      downloadSingleTrack(t.id, t.title, t.artist);
+      trackPendingAddToPlaylist = null;
     }
 
     function closeAddToPlaylistModal() {
@@ -1245,7 +1300,7 @@
         container.innerHTML = '';
 
         if (customPlaylists.length === 0) {
-          container.innerHTML = '<div class="text-center py-4 text-gray-500 text-xs">No custom playlists yet. Create one above!</div>';
+          container.innerHTML = '<div class="text-center py-3 text-gray-500 text-xs">No custom playlists yet. Use "Create New Playlist" above!</div>';
           return;
         }
 
@@ -1259,7 +1314,9 @@
               <div class="text-xs font-semibold text-white line-clamp-1">${pl.title}</div>
               <div class="text-[11px] text-gray-400">${pl.track_count} songs</div>
             </div>
-            <span class="text-xs text-indigo-400 font-medium px-2 py-1 bg-white/5 rounded-lg">+ Add</span>
+            <span class="text-xs text-indigo-400 font-medium px-2 py-1 bg-white/5 rounded-lg flex items-center gap-1">
+              <span>⬇️</span> Save
+            </span>
           `;
           container.appendChild(row);
         });
@@ -1285,11 +1342,13 @@
           })
         });
         closeAddToPlaylistModal();
-        showToast(`✓ Added to "${playlistName}"!`);
+        showToast(`✓ Saved to "${playlistName}" & downloading to phone!`);
+        // Start device IndexedDB download simultaneously
+        downloadSingleTrack(track.id, track.title, track.artist);
         trackPendingAddToPlaylist = null;
         loadUserPlaylists();
       } catch (e) {
-        showToast("Failed to add song to playlist");
+        showToast("Failed to save track to playlist");
       }
     }
 
@@ -1318,58 +1377,131 @@
     }
 
     // -------------------------------------------------------------
-    // Home / Trending / Moods
+    // Home / Explore (Trending, New Releases, Featured Playlists, Moods)
     // -------------------------------------------------------------
     async function loadTrending() {
-      const container = document.getElementById('trending-container');
-      container.innerHTML = `
-        <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
-        <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
-        <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
-        <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
-      `;
+      const trendingContainer = document.getElementById('trending-container');
+      const newReleasesContainer = document.getElementById('new-releases-container');
+      const featuredContainer = document.getElementById('featured-playlists-container');
+
+      if (trendingContainer) {
+        trendingContainer.innerHTML = `
+          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+        `;
+      }
+      if (newReleasesContainer) {
+        newReleasesContainer.innerHTML = `
+          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+          <div class="h-44 rounded-xl bg-white/5 animate-pulse"></div>
+        `;
+      }
+      if (featuredContainer) {
+        featuredContainer.innerHTML = `
+          <div class="h-32 rounded-xl bg-white/5 animate-pulse"></div>
+          <div class="h-32 rounded-xl bg-white/5 animate-pulse"></div>
+        `;
+      }
 
       try {
         const res = await fetch('/api/home');
         const data = await res.json();
         
-        container.innerHTML = '';
-        data.trending.forEach((track) => {
-          const card = document.createElement('div');
-          card.className = "glass-card p-2.5 rounded-2xl flex flex-col gap-2 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
-          card.onclick = () => playTrackFromList(track, data.trending);
-          card.innerHTML = `
-            <div class="relative w-full aspect-square rounded-xl overflow-hidden bg-black/40">
-              <img src="${track.thumbnail}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" alt="thumb" loading="lazy">
-              <!-- Play overlay -->
-              <button class="absolute bottom-2 right-2 w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center opacity-90 shadow-lg">
-                <svg class="w-4 h-4 fill-current ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-              </button>
-              <!-- Add to playlist trigger -->
-              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(track)})" class="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 backdrop-blur-md text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow" title="Add to Playlist">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-              </button>
-            </div>
-            <div class="min-w-0">
-              <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
-              <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
-            </div>
-          `;
-          container.appendChild(card);
-        });
+        // 1. Render Trending Hits
+        if (trendingContainer && data.trending) {
+          trendingContainer.innerHTML = '';
+          data.trending.forEach((track) => {
+            const card = document.createElement('div');
+            card.className = "glass-card p-2.5 rounded-2xl flex flex-col gap-2 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
+            card.onclick = () => playTrackFromList(track, data.trending);
+            card.innerHTML = `
+              <div class="relative w-full aspect-square rounded-xl overflow-hidden bg-black/40">
+                <img src="${track.thumbnail}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" alt="thumb" loading="lazy">
+                <!-- Play overlay -->
+                <button class="absolute bottom-2 right-2 w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center opacity-90 shadow-lg">
+                  <svg class="w-4 h-4 fill-current ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                </button>
+                <!-- Unified Download Button (Only button) -->
+                <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(track)})" class="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 backdrop-blur-md text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow" title="Download / Add to Playlist">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                </button>
+              </div>
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
+                <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
+              </div>
+            `;
+            trendingContainer.appendChild(card);
+          });
+        }
 
+        // 2. Render New Releases
+        if (newReleasesContainer && data.new_releases) {
+          newReleasesContainer.innerHTML = '';
+          data.new_releases.forEach((track) => {
+            const card = document.createElement('div');
+            card.className = "glass-card p-2.5 rounded-2xl flex flex-col gap-2 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
+            card.onclick = () => playTrackFromList(track, data.new_releases);
+            card.innerHTML = `
+              <div class="relative w-full aspect-square rounded-xl overflow-hidden bg-black/40">
+                <img src="${track.thumbnail}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" alt="thumb" loading="lazy">
+                <span class="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-purple-600/80 backdrop-blur-md text-[10px] font-bold text-white uppercase tracking-wider">New</span>
+                <!-- Play overlay -->
+                <button class="absolute bottom-2 right-2 w-9 h-9 rounded-full bg-purple-600 text-white flex items-center justify-center opacity-90 shadow-lg">
+                  <svg class="w-4 h-4 fill-current ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                </button>
+                <!-- Unified Download Button -->
+                <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(track)})" class="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 backdrop-blur-md text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow" title="Download / Add to Playlist">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                </button>
+              </div>
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
+                <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
+              </div>
+            `;
+            newReleasesContainer.appendChild(card);
+          });
+        }
+
+        // 3. Render Top Charts & Featured Playlists
+        if (featuredContainer && data.featured_playlists) {
+          featuredContainer.innerHTML = '';
+          data.featured_playlists.forEach(pl => {
+            const card = document.createElement('div');
+            card.className = "glass-card p-2.5 rounded-2xl flex items-center gap-3 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer";
+            card.onclick = () => openPlaylist(pl.id, false);
+            card.innerHTML = `
+              <img src="${pl.thumbnail}" class="w-14 h-14 rounded-xl object-cover shrink-0 shadow" alt="pl" loading="lazy">
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-semibold text-white line-clamp-1">${pl.title}</div>
+                <div class="text-xs text-indigo-400 line-clamp-1 mt-0.5">${pl.count || 'Playlist'}</div>
+              </div>
+              <span class="text-xs text-gray-400 p-2">▶</span>
+            `;
+            featuredContainer.appendChild(card);
+          });
+        }
+
+        // 4. Render Moods & Genres
         const moodsContainer = document.getElementById('moods-container');
-        moodsContainer.innerHTML = '';
-        data.moods.forEach(m => {
-          const pill = document.createElement('button');
-          pill.className = "px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 active:bg-indigo-600/30 text-xs font-medium text-gray-300 whitespace-nowrap transition border border-white/5";
-          pill.innerText = m.title;
-          pill.onclick = () => loadMoodPlaylists(m.params, m.title);
-          moodsContainer.appendChild(pill);
-        });
+        if (moodsContainer && data.moods) {
+          moodsContainer.innerHTML = '';
+          data.moods.forEach(m => {
+            const pill = document.createElement('button');
+            pill.className = "px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 active:bg-indigo-600/30 text-xs font-medium text-gray-300 whitespace-nowrap transition border border-white/5";
+            pill.innerText = m.title;
+            pill.onclick = () => loadMoodPlaylists(m.params, m.title);
+            moodsContainer.appendChild(pill);
+          });
+        }
 
       } catch (e) {
-        container.innerHTML = `<div class="col-span-full py-8 text-center text-gray-400 text-sm">Failed to load trending. Tap refresh.</div>`;
+        if (trendingContainer) {
+          trendingContainer.innerHTML = `<div class="col-span-full py-8 text-center text-gray-400 text-sm">Failed to load explore feed. Tap refresh.</div>`;
+        }
       }
     }
 
@@ -1403,8 +1535,127 @@
     }
 
     // -------------------------------------------------------------
-    // Search
+    // Search Autocomplete & Search Execution
     // -------------------------------------------------------------
+    let searchDebounceTimer = null;
+    let currentSuggestions = [];
+    let selectedSuggestionIdx = -1;
+
+    function hideSearchSuggestions() {
+      const dropdown = document.getElementById('search-suggestions-dropdown');
+      if (dropdown) dropdown.classList.add('hidden');
+      selectedSuggestionIdx = -1;
+    }
+
+    function onSearchInput(val) {
+      clearTimeout(searchDebounceTimer);
+      const query = (val || '').trim();
+      if (!query || query.length < 1) {
+        hideSearchSuggestions();
+        return;
+      }
+
+      searchDebounceTimer = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/search/suggestions?q=${encodeURIComponent(query)}`);
+          const data = await res.json();
+          renderSearchSuggestions(data.suggestions || []);
+        } catch (e) {
+          hideSearchSuggestions();
+        }
+      }, 220);
+    }
+
+    function renderSearchSuggestions(suggestions) {
+      const dropdown = document.getElementById('search-suggestions-dropdown');
+      if (!dropdown) return;
+      currentSuggestions = suggestions || [];
+      selectedSuggestionIdx = -1;
+
+      if (currentSuggestions.length === 0) {
+        dropdown.classList.add('hidden');
+        return;
+      }
+
+      dropdown.innerHTML = '';
+      currentSuggestions.forEach((s, idx) => {
+        const item = document.createElement('div');
+        item.id = `search-sug-${idx}`;
+        item.className = "px-4 py-2.5 text-xs text-gray-200 hover:bg-white/10 flex items-center gap-3 cursor-pointer transition active:bg-indigo-600/30";
+        item.innerHTML = `
+          <svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          <span class="line-clamp-1 flex-1 font-medium">${escapeHtml(s)}</span>
+          <span class="text-[10px] text-gray-500">search</span>
+        `;
+        item.onclick = () => selectSuggestion(s);
+        dropdown.appendChild(item);
+      });
+
+      dropdown.classList.remove('hidden');
+    }
+
+    function selectSuggestion(text) {
+      const input = document.getElementById('search-input');
+      if (input) input.value = text;
+      hideSearchSuggestions();
+      performSearch();
+    }
+
+    function handleSearchKeydown(event) {
+      const dropdown = document.getElementById('search-suggestions-dropdown');
+      const isDropdownVisible = dropdown && !dropdown.classList.contains('hidden');
+
+      if (event.key === 'ArrowDown' && isDropdownVisible) {
+        event.preventDefault();
+        selectedSuggestionIdx = Math.min(selectedSuggestionIdx + 1, currentSuggestions.length - 1);
+        highlightSuggestion(selectedSuggestionIdx);
+        return;
+      }
+
+      if (event.key === 'ArrowUp' && isDropdownVisible) {
+        event.preventDefault();
+        selectedSuggestionIdx = Math.max(selectedSuggestionIdx - 1, -1);
+        highlightSuggestion(selectedSuggestionIdx);
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        if (isDropdownVisible && selectedSuggestionIdx >= 0 && currentSuggestions[selectedSuggestionIdx]) {
+          event.preventDefault();
+          selectSuggestion(currentSuggestions[selectedSuggestionIdx]);
+          return;
+        }
+        hideSearchSuggestions();
+        performSearch();
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        hideSearchSuggestions();
+      }
+    }
+
+    function highlightSuggestion(index) {
+      currentSuggestions.forEach((_, i) => {
+        const el = document.getElementById(`search-sug-${i}`);
+        if (!el) return;
+        if (i === index) {
+          el.classList.add('bg-white/15', 'text-white');
+          el.scrollIntoView({ block: 'nearest' });
+        } else {
+          el.classList.remove('bg-white/15', 'text-white');
+        }
+      });
+    }
+
+    // Dismiss suggestions when clicking outside
+    document.addEventListener('click', (e) => {
+      const wrapper = document.getElementById('search-input-wrapper');
+      if (wrapper && !wrapper.contains(e.target)) {
+        hideSearchSuggestions();
+      }
+    });
+
     function setSearchFilter(filter) {
       currentSearchFilter = filter;
       document.getElementById('filter-songs').className = filter === 'songs' 
@@ -1413,10 +1664,12 @@
       document.getElementById('filter-playlists').className = filter === 'playlists' 
         ? "px-3.5 py-1.5 rounded-full bg-indigo-600 text-white font-medium transition" 
         : "px-3.5 py-1.5 rounded-full bg-white/10 text-gray-300 font-medium transition";
+      hideSearchSuggestions();
       performSearch();
     }
 
     async function performSearch() {
+      hideSearchSuggestions();
       const q = document.getElementById('search-input').value.trim();
       if (!q) return;
       const resContainer = document.getElementById('search-results');
@@ -1460,12 +1713,8 @@
                 <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(item)}, event)" class="p-2 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
                   <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
                 </button>
-                <!-- Add to playlist -->
-                <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(item)})" class="p-2 text-gray-400 hover:text-white" title="Add to Playlist">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                </button>
-                <!-- Download -->
-                <button onclick="event.stopPropagation(); downloadSingleTrack('${item.id}', '${escapeQuotes(item.title)}', '${escapeQuotes(item.artist)}')" class="p-2 text-gray-400 hover:text-white" title="Download">
+                <!-- Unified Download / Add to Playlist (Only button) -->
+                <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(item)})" class="p-2 text-gray-400 hover:text-white" title="Download / Add to Playlist">
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                 </button>
               </div>
@@ -1529,9 +1778,9 @@
               <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(t)}, event)" class="p-1.5 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
                 <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
               </button>
-              <!-- Add to another playlist -->
-              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(t)})" class="p-1.5 text-gray-400 hover:text-white" title="Add to Playlist">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              <!-- Save to Playlist -->
+              <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(t)})" class="p-1.5 text-gray-400 hover:text-white" title="Save to Playlist">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               </button>
               <!-- Delete from Device -->
               <button onclick="event.stopPropagation(); deleteOfflineTrack('${t.id}', '${escapeQuotes(t.title)}')" class="p-1.5 text-red-400 hover:text-red-300" title="Delete from Device">
@@ -1574,12 +1823,8 @@
               <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(t)}, event)" class="p-1.5 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
                 <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
               </button>
-              <!-- Add to another playlist -->
-              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(t)})" class="p-1.5 text-gray-400 hover:text-white" title="Add to Playlist">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-              </button>
-              <!-- Download -->
-              <button onclick="event.stopPropagation(); downloadSingleTrack('${t.id}', '${escapeQuotes(t.title)}', '${escapeQuotes(t.artist)}')" class="p-1.5 text-gray-400 hover:text-white" title="Download">
+              <!-- Unified Download / Add to Playlist (Only button) -->
+              <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(t)})" class="p-1.5 text-gray-400 hover:text-white" title="Download / Add to Playlist">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               </button>
               ${isUserPlaylist && !isSystemVirtual ? `
@@ -1682,9 +1927,9 @@
               <div class="text-xs text-gray-400 line-clamp-1">${track.artist} • ${track.sizeFormatted || 'Offline'}</div>
             </div>
             <div class="flex items-center gap-1.5">
-              <!-- Add to Playlist -->
-              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(track)})" class="p-1.5 text-gray-400 hover:text-white" title="Add to Playlist">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              <!-- Save to Playlist -->
+              <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(track)})" class="p-1.5 text-gray-400 hover:text-white" title="Save to Playlist">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               </button>
               <!-- Delete from Device -->
               <button onclick="event.stopPropagation(); deleteOfflineTrack('${track.id}', '${escapeQuotes(track.title)}')" class="p-1.5 text-red-400 hover:text-red-300" title="Delete from Device">
@@ -2059,6 +2304,16 @@
 
     function closeQrModal() {
       document.getElementById('qr-modal').classList.add('hidden');
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
     }
 
     function escapeQuotes(str) {

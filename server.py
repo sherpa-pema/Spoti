@@ -176,16 +176,20 @@ def get_me(authorization: Optional[str] = Header(None)):
 # -------------------------------------------------------------
 @app.get("/api/home")
 def get_home_feed():
-    """Fetches trending songs and mood categories with 15-minute in-memory caching."""
+    """Fetches trending songs, new releases, featured playlists, and mood categories with 15-minute in-memory caching."""
     now = time.time()
     with _CACHE_LOCK:
         if "home" in _CACHE and _CACHE["home"]["expires_at"] > now:
             return _CACHE["home"]["data"]
 
     trending = music_api.get_trending_tracks(limit=25)
+    new_releases = music_api.get_new_releases(limit=20)
+    featured_playlists = music_api.get_featured_playlists(limit=10)
     moods_data = music_api.get_moods_and_genres()
     data = {
         "trending": trending,
+        "new_releases": new_releases,
+        "featured_playlists": featured_playlists,
         "moods": moods_data.get("moods", []),
         "genres": moods_data.get("genres", []),
     }
@@ -202,6 +206,13 @@ def search(q: str = Query(..., min_length=1), filter_type: str = Query("songs"))
     """Searches YouTube Music for tracks or playlists."""
     results = music_api.search_music(q, filter_type=filter_type, limit=25)
     return {"query": q, "results": results}
+
+
+@app.get("/api/search/suggestions")
+def get_search_suggestions(q: str = Query(..., min_length=1)):
+    """Returns autocomplete suggestions as user types in search bar."""
+    suggestions = music_api.get_search_suggestions(q)
+    return {"query": q, "suggestions": suggestions}
 
 
 @app.get("/api/mood-playlists")
