@@ -5,7 +5,7 @@ import time
 import socket
 import threading
 from typing import Optional, Dict, Any, List
-from fastapi import FastAPI, Query, HTTPException, Header
+from fastapi import FastAPI, Query, HTTPException, Header, Request
 from fastapi.responses import FileResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -101,25 +101,32 @@ def get_local_ip() -> str:
     return ip
 
 
+def resolve_request_url(request: Request) -> str:
+    ip = get_local_ip()
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or f"{ip}:8000"
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
+    return f"{proto}://{host}"
+
+
 # -------------------------------------------------------------
 # System & Diagnostics Endpoints
 # -------------------------------------------------------------
 @app.get("/api/info")
-def get_server_info():
+def get_server_info(request: Request):
     ip = get_local_ip()
+    active_url = resolve_request_url(request)
     return {
         "local_ip": ip,
         "port": 8000,
-        "url": f"http://{ip}:8000",
+        "url": active_url,
         "desktop_url": "http://localhost:8000",
     }
 
 
 @app.get("/api/qr")
-def get_qr_code():
-    """Generates a QR code PNG pointing to the server's local network URL."""
-    ip = get_local_ip()
-    target_url = f"http://{ip}:8000"
+def get_qr_code(request: Request):
+    """Generates a QR code PNG pointing to the server's local network or HTTPS URL."""
+    target_url = resolve_request_url(request)
     if qrcode is not None:
         try:
             qr = qrcode.QRCode(box_size=8, border=2)
