@@ -168,34 +168,11 @@
     
     <!-- TAB: HOME / EXPLORE -->
     <section id="tab-home" class="space-y-6">
-      <!-- 1. Moods & Genres (Top) -->
-      <div>
-        <h2 class="text-lg font-bold text-white mb-3 flex items-center gap-2">
-          <span>🎧</span> Moods & Genres
-        </h2>
-        <div id="moods-container" class="flex gap-2 overflow-x-auto pb-2 scrollbar-none"></div>
-        <div id="mood-playlists-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5 mt-3 hidden"></div>
-      </div>
-
-      <!-- 2. Top Charts & Featured Playlists -->
+      <!-- 1. Trending Now [iTunes + Deezer] -->
       <div>
         <div class="flex items-center justify-between mb-3">
           <h2 class="text-lg font-bold text-white flex items-center gap-2">
-            <span>🏆</span> Top Charts & Playlists
-          </h2>
-          <span class="text-xs text-gray-400">Curated collections</span>
-        </div>
-        <div id="featured-playlists-container" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
-          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
-        </div>
-      </div>
-
-      <!-- 3. Trending Hits -->
-      <div>
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-bold text-white flex items-center gap-2">
-            <span>🔥</span> Trending Hits
+            <span>🔥</span> Trending Now
           </h2>
           <span class="text-xs text-indigo-400 font-medium cursor-pointer" onclick="loadTrending()">Refresh</span>
         </div>
@@ -207,19 +184,60 @@
         </div>
       </div>
 
-      <!-- 4. New Releases -->
+      <!-- 2. Billboard Hot 100 -->
+      <div>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <span>🏆</span> Billboard Hot 100
+          </h2>
+          <span class="text-[11px] font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/25 px-2.5 py-0.5 rounded-full">Official Chart</span>
+        </div>
+        <div id="billboard-container" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+        </div>
+      </div>
+
+      <!-- 3. New Releases -->
       <div>
         <div class="flex items-center justify-between mb-3">
           <h2 class="text-lg font-bold text-white flex items-center gap-2">
             <span>✨</span> New Releases
           </h2>
-          <span class="text-xs text-gray-400">Fresh tracks</span>
+          <span class="text-xs text-gray-400">Fresh hits & albums</span>
         </div>
         <div id="new-releases-container" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
           <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
           <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
           <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
           <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+        </div>
+      </div>
+
+      <!-- 4. Genres / Moods [Deezer Genres Grid] -->
+      <div>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <span>🎧</span> Genres & Moods
+          </h2>
+          <span class="text-xs text-gray-400">Curated collections</span>
+        </div>
+        <div id="genres-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+          <div class="h-24 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-24 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-24 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-24 rounded-2xl bg-white/5 animate-pulse"></div>
+        </div>
+
+        <!-- Curated Genre Tracks Drawer -->
+        <div id="genre-tracks-drawer" class="mt-4 p-4 rounded-3xl glass-panel border border-white/10 hidden">
+          <div class="flex items-center justify-between mb-3">
+            <h3 id="genre-drawer-title" class="text-base font-bold text-white flex items-center gap-2"></h3>
+            <button onclick="closeGenreDrawer()" class="text-xs px-2.5 py-1 rounded-full bg-white/10 text-gray-300 hover:text-white transition">Close ✕</button>
+          </div>
+          <div id="genre-tracks-list" class="space-y-2"></div>
         </div>
       </div>
     </section>
@@ -1519,10 +1537,28 @@
     // Alias for backwards compatibility
     const promptAddToPlaylist = promptDownloadTrack;
 
-    function confirmQuickDownload() {
+    async function ensureTrackHasYtId(track) {
+      if (track.id && track.id.length === 11 && !track.id.startsWith('ext_')) {
+        return track.id;
+      }
+      try {
+        const res = await fetch(`/api/resolve?title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist || '')}`);
+        const data = await res.json();
+        if (data && data.track && data.track.id) {
+          track.id = data.track.id;
+          return data.track.id;
+        }
+      } catch (err) {
+        console.warn("Resolve error during download:", err);
+      }
+      return track.id;
+    }
+
+    async function confirmQuickDownload() {
       if (!trackPendingAddToPlaylist) return;
       const t = trackPendingAddToPlaylist;
       closeAddToPlaylistModal();
+      await ensureTrackHasYtId(t);
       downloadSingleTrack(t.id, t.title, t.artist, t.thumbnail);
       trackPendingAddToPlaylist = null;
     }
@@ -1572,6 +1608,7 @@
     async function addTrackToSpecificPlaylist(playlistId, track, playlistName) {
       if (!track) return;
       try {
+        await ensureTrackHasYtId(track);
         await authFetch(`/api/user-playlists/${playlistId}/tracks`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1629,25 +1666,88 @@
     }
 
     // -------------------------------------------------------------
-    // Home / Explore (Trending, New Releases, Featured Playlists, Moods)
+    // Click-to-Play Resolver (Fast YouTube Search + yt-dlp)
+    // -------------------------------------------------------------
+    async function resolveAndPlayTrack(item, listContext = [], cardElement = null) {
+      if (!item) return;
+
+      // If item already has a verified 11-char YouTube video ID
+      if (item.yt_id || (item.id && !item.id.startsWith('ext_') && item.id.length === 11)) {
+        const playItem = {
+          id: item.yt_id || item.id,
+          title: item.title,
+          artist: item.artist,
+          thumbnail: item.thumbnail,
+          duration: item.duration || '--:--'
+        };
+        playTrackFromList(playItem, listContext);
+        return;
+      }
+
+      // Visual feedback on card
+      let originalHtml = '';
+      let playIndicator = null;
+      if (cardElement) {
+        cardElement.classList.add('opacity-75');
+        playIndicator = cardElement.querySelector('.play-indicator-slot');
+        if (playIndicator) {
+          originalHtml = playIndicator.innerHTML;
+          playIndicator.innerHTML = '<div class="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>';
+          playIndicator.classList.remove('opacity-0');
+        }
+      }
+
+      try {
+        const res = await fetch(`/api/resolve?title=${encodeURIComponent(item.title)}&artist=${encodeURIComponent(item.artist || '')}`);
+        const data = await res.json();
+        if (data && data.track && data.track.id) {
+          item.yt_id = data.track.id;
+          item.id = data.track.id;
+          const playItem = {
+            id: data.track.id,
+            title: item.title,
+            artist: item.artist || data.track.artist,
+            thumbnail: item.thumbnail || data.track.thumbnail,
+            duration: data.track.duration || '--:--'
+          };
+          await playTrackFromList(playItem, listContext);
+        } else {
+          showToast('⚠️ Could not match song on YouTube');
+        }
+      } catch (err) {
+        console.error('Resolve error:', err);
+        showToast('⚠️ Error resolving song on YouTube');
+      } finally {
+        if (cardElement) {
+          cardElement.classList.remove('opacity-75');
+          if (playIndicator && originalHtml) {
+            playIndicator.innerHTML = originalHtml;
+            playIndicator.classList.add('opacity-0');
+          }
+        }
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Home / Explore (Trending, Billboard Hot 100, New Releases, Genres)
     // -------------------------------------------------------------
     async function loadTrending() {
       const trendingContainer = document.getElementById('trending-container');
+      const billboardContainer = document.getElementById('billboard-container');
       const newReleasesContainer = document.getElementById('new-releases-container');
-      const featuredContainer = document.getElementById('featured-playlists-container');
-      const moodsContainer = document.getElementById('moods-container');
+      const genresContainer = document.getElementById('genres-container');
 
-      if (moodsContainer && moodsContainer.children.length === 0) {
-        moodsContainer.innerHTML = `
-          <div class="w-20 h-8 rounded-xl bg-white/5 animate-pulse shrink-0"></div>
-          <div class="w-24 h-8 rounded-xl bg-white/5 animate-pulse shrink-0"></div>
-          <div class="w-28 h-8 rounded-xl bg-white/5 animate-pulse shrink-0"></div>
-          <div class="w-20 h-8 rounded-xl bg-white/5 animate-pulse shrink-0"></div>
-        `;
-      }
-
+      // Set skeleton loaders
       if (trendingContainer) {
         trendingContainer.innerHTML = `
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+        `;
+      }
+      if (billboardContainer) {
+        billboardContainer.innerHTML = `
           <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
           <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
           <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
@@ -1662,34 +1762,39 @@
           <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
         `;
       }
-      if (featuredContainer) {
-        featuredContainer.innerHTML = `
-          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
-          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+      if (genresContainer) {
+        genresContainer.innerHTML = `
+          <div class="h-24 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-24 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-24 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-24 rounded-2xl bg-white/5 animate-pulse"></div>
         `;
       }
 
       try {
         const res = await fetch('/api/home');
         const data = await res.json();
-        
-        // 1. Render Trending Hits
+
+        // 1. Render Trending Now [iTunes + Deezer]
         if (trendingContainer && data.trending) {
           trendingContainer.innerHTML = '';
-          data.trending.forEach((track) => {
+          data.trending.forEach((track, i) => {
             const card = document.createElement('div');
             card.className = "glass-card p-2.5 rounded-2xl flex items-center gap-3 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
-            card.onclick = () => playTrackFromList(track, data.trending);
+            card.onclick = () => resolveAndPlayTrack(track, data.trending, card);
+            const rankNum = track.rank || (i + 1);
             card.innerHTML = `
               <div class="relative w-14 h-14 rounded-xl overflow-hidden bg-black/40 shrink-0 shadow">
                 <img src="${track.thumbnail}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" alt="thumb" loading="lazy">
-                <div class="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                <span class="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-md text-[9px] font-bold text-white font-mono">#${rankNum}</span>
+                <div class="play-indicator-slot absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
                   <svg class="w-5 h-5 fill-white ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                 </div>
               </div>
               <div class="min-w-0 flex-1">
                 <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
                 <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
+                <span class="inline-block mt-1 text-[9px] font-medium px-1.5 py-0.2 rounded bg-white/5 text-indigo-300">${track.source || 'Trending'}</span>
               </div>
               ${renderDownloadBtnHtml(track)}
             `;
@@ -1697,24 +1802,57 @@
           });
         }
 
-        // 2. Render New Releases
-        if (newReleasesContainer && data.new_releases) {
-          newReleasesContainer.innerHTML = '';
-          data.new_releases.forEach((track) => {
+        // 2. Render Billboard Hot 100
+        if (billboardContainer && data.billboard) {
+          billboardContainer.innerHTML = '';
+          data.billboard.forEach((track, i) => {
             const card = document.createElement('div');
             card.className = "glass-card p-2.5 rounded-2xl flex items-center gap-3 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
-            card.onclick = () => playTrackFromList(track, data.new_releases);
+            card.onclick = () => resolveAndPlayTrack(track, data.billboard, card);
+            const rankNum = track.rank || (i + 1);
+            let badgeClass = "bg-black/60 text-white";
+            if (rankNum === 1) badgeClass = "bg-amber-400 text-black font-extrabold shadow-sm";
+            else if (rankNum <= 3) badgeClass = "bg-amber-300/90 text-black font-bold";
+            else if (rankNum <= 10) badgeClass = "bg-indigo-600/90 text-white font-bold";
+
             card.innerHTML = `
               <div class="relative w-14 h-14 rounded-xl overflow-hidden bg-black/40 shrink-0 shadow">
                 <img src="${track.thumbnail}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" alt="thumb" loading="lazy">
-                <span class="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-purple-600/90 text-[9px] font-bold text-white uppercase tracking-wider">New</span>
-                <div class="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                <span class="absolute top-1 left-1 px-1.5 py-0.5 rounded ${badgeClass} text-[9px] font-mono">#${rankNum}</span>
+                <div class="play-indicator-slot absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
                   <svg class="w-5 h-5 fill-white ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                 </div>
               </div>
               <div class="min-w-0 flex-1">
                 <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
                 <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
+                ${track.weeks_on_chart ? `<span class="text-[10px] text-amber-300/80 mt-0.5 block font-mono">${track.weeks_on_chart} wks on chart</span>` : ''}
+              </div>
+              ${renderDownloadBtnHtml(track)}
+            `;
+            billboardContainer.appendChild(card);
+          });
+        }
+
+        // 3. Render New Releases
+        if (newReleasesContainer && data.new_releases) {
+          newReleasesContainer.innerHTML = '';
+          data.new_releases.forEach((track) => {
+            const card = document.createElement('div');
+            card.className = "glass-card p-2.5 rounded-2xl flex items-center gap-3 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
+            card.onclick = () => resolveAndPlayTrack(track, data.new_releases, card);
+            card.innerHTML = `
+              <div class="relative w-14 h-14 rounded-xl overflow-hidden bg-black/40 shrink-0 shadow">
+                <img src="${track.thumbnail}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" alt="thumb" loading="lazy">
+                <span class="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-purple-600/90 text-[9px] font-bold text-white uppercase tracking-wider">New</span>
+                <div class="play-indicator-slot absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                  <svg class="w-5 h-5 fill-white ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                </div>
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
+                <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
+                ${track.release_date ? `<span class="text-[10px] text-purple-300/80 mt-0.5 block font-mono">${track.release_date}</span>` : ''}
               </div>
               ${renderDownloadBtnHtml(track)}
             `;
@@ -1722,35 +1860,20 @@
           });
         }
 
-        // 3. Render Top Charts & Featured Playlists
-        if (featuredContainer && data.featured_playlists) {
-          featuredContainer.innerHTML = '';
-          data.featured_playlists.forEach(pl => {
+        // 4. Render Genres & Moods (Deezer Grid)
+        if (genresContainer && data.genres) {
+          genresContainer.innerHTML = '';
+          data.genres.forEach(g => {
             const card = document.createElement('div');
-            card.className = "glass-card p-2.5 rounded-2xl flex items-center gap-3 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer";
-            card.onclick = () => openPlaylist(pl.id, false);
+            card.className = "relative h-24 rounded-2xl overflow-hidden p-3 flex flex-col justify-between cursor-pointer group active:scale-[0.98] transition shadow";
+            card.onclick = () => openGenreTracks(g);
             card.innerHTML = `
-              <img src="${pl.thumbnail}" class="w-14 h-14 rounded-xl object-cover shrink-0 shadow" alt="pl" loading="lazy">
-              <div class="min-w-0 flex-1">
-                <div class="text-sm font-semibold text-white line-clamp-1">${pl.title}</div>
-                <div class="text-xs text-indigo-400 line-clamp-1 mt-0.5">${pl.count || 'Playlist'}</div>
-              </div>
-              <span class="text-xs text-gray-400 p-2">▶</span>
+              <img src="${g.picture}" class="absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition duration-500" alt="${g.name}" loading="lazy">
+              <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent"></div>
+              <span class="relative self-end text-[10px] font-semibold text-white/90 bg-white/20 backdrop-blur-md px-2 py-0.5 rounded-full">${(g.tracks || []).length} Hits</span>
+              <span class="relative text-sm font-bold text-white tracking-wide">${g.name}</span>
             `;
-            featuredContainer.appendChild(card);
-          });
-        }
-
-        // 4. Render Moods & Genres
-        const moodsContainer = document.getElementById('moods-container');
-        if (moodsContainer && data.moods) {
-          moodsContainer.innerHTML = '';
-          data.moods.forEach(m => {
-            const pill = document.createElement('button');
-            pill.className = "px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 active:bg-indigo-600/30 text-xs font-medium text-gray-300 whitespace-nowrap transition border border-white/5";
-            pill.innerText = m.title;
-            pill.onclick = () => loadMoodPlaylists(m.params, m.title);
-            moodsContainer.appendChild(pill);
+            genresContainer.appendChild(card);
           });
         }
 
@@ -1763,33 +1886,49 @@
       }
     }
 
-    async function loadMoodPlaylists(params, title) {
-      const plContainer = document.getElementById('mood-playlists-container');
-      plContainer.classList.remove('hidden');
-      plContainer.innerHTML = '<div class="col-span-full py-6 text-center text-gray-400 text-sm">Loading curated playlists...</div>';
+    function openGenreTracks(genre) {
+      const drawer = document.getElementById('genre-tracks-drawer');
+      const titleEl = document.getElementById('genre-drawer-title');
+      const listEl = document.getElementById('genre-tracks-list');
+      if (!drawer || !listEl) return;
 
-      try {
-        const res = await fetch(`/api/mood-playlists?params=${encodeURIComponent(params)}`);
-        const data = await res.json();
-        plContainer.innerHTML = '';
-        data.playlists.forEach(pl => {
-          const card = document.createElement('div');
-          card.className = "glass-card p-2.5 rounded-2xl flex flex-col gap-2 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer";
-          card.onclick = () => openPlaylist(pl.id, false);
-          card.innerHTML = `
-            <div class="w-full aspect-square rounded-xl overflow-hidden bg-black/40">
-              <img src="${pl.thumbnail}" class="w-full h-full object-cover" alt="pl" loading="lazy">
-            </div>
-            <div class="min-w-0">
-              <div class="text-sm font-semibold text-white line-clamp-1">${pl.title}</div>
-              <div class="text-xs text-gray-400 line-clamp-1">${pl.count || 'Playlist'}</div>
-            </div>
-          `;
-          plContainer.appendChild(card);
-        });
-      } catch (e) {
-        plContainer.innerHTML = '<div class="col-span-full text-center text-red-400 text-xs">Failed to load playlists.</div>';
+      drawer.classList.remove('hidden');
+      drawer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      titleEl.innerText = `🎧 ${genre.name} — Top Tracks`;
+
+      const tracks = genre.tracks || [];
+      if (tracks.length === 0) {
+        listEl.innerHTML = '<div class="text-xs text-gray-400 py-4 text-center">No tracks available for this genre.</div>';
+        return;
       }
+
+      listEl.innerHTML = '';
+      tracks.forEach((t, i) => {
+        const row = document.createElement('div');
+        row.className = "glass-card p-2.5 rounded-2xl flex items-center gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer group";
+        row.onclick = () => resolveAndPlayTrack(t, tracks, row);
+        row.innerHTML = `
+          <span class="w-5 text-center text-xs font-mono font-bold text-gray-400 group-hover:text-indigo-400">${i + 1}</span>
+          <div class="relative w-11 h-11 rounded-xl overflow-hidden bg-black/40 shrink-0 shadow">
+            <img src="${t.thumbnail || genre.picture}" class="w-full h-full object-cover" alt="art" loading="lazy">
+            <div class="play-indicator-slot absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+              <svg class="w-4 h-4 fill-white ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            </div>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="text-xs font-semibold text-white line-clamp-1">${t.title}</div>
+            <div class="text-[11px] text-gray-400 line-clamp-1">${t.artist}</div>
+          </div>
+          <span class="text-[11px] text-gray-400 font-mono px-1">${t.duration || ''}</span>
+          ${renderDownloadBtnHtml(t)}
+        `;
+        listEl.appendChild(row);
+      });
+    }
+
+    function closeGenreDrawer() {
+      const drawer = document.getElementById('genre-tracks-drawer');
+      if (drawer) drawer.classList.add('hidden');
     }
 
     // -------------------------------------------------------------

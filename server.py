@@ -178,34 +178,235 @@ def get_me(authorization: Optional[str] = Header(None)):
     }
 
 
+import json
+
+# In-memory resolution cache
+_RESOLVE_CACHE: Dict[str, Dict[str, Any]] = {}
+_RESOLVE_LOCK = threading.Lock()
+
+
+def load_explore_from_pocketbase() -> Optional[Dict[str, Any]]:
+    """Loads curated Explore data from PocketBase collections."""
+    try:
+        pb = database.get_pb()
+        trending_recs = pb.collection("trending").get_full_list(query_params={"sort": "rank"})
+        billboard_recs = pb.collection("billboard").get_full_list(query_params={"sort": "rank"})
+        new_releases_recs = pb.collection("new_releases").get_full_list()
+        genres_recs = pb.collection("genres").get_full_list(query_params={"sort": "genre_id"})
+
+        if not trending_recs and not billboard_recs:
+            return None
+
+        trending = [{
+            "id": r.id,
+            "title": r.title,
+            "artist": getattr(r, "artist", ""),
+            "thumbnail": getattr(r, "thumbnail", ""),
+            "rank": getattr(r, "rank", 0),
+            "source": getattr(r, "source", ""),
+            "yt_id": getattr(r, "yt_id", "")
+        } for r in trending_recs]
+
+        billboard = [{
+            "id": r.id,
+            "title": r.title,
+            "artist": getattr(r, "artist", ""),
+            "thumbnail": getattr(r, "thumbnail", ""),
+            "rank": getattr(r, "rank", 0),
+            "peak_pos": getattr(r, "peak_pos", None),
+            "last_pos": getattr(r, "last_pos", None),
+            "weeks_on_chart": getattr(r, "weeks_on_chart", None),
+            "yt_id": getattr(r, "yt_id", "")
+        } for r in billboard_recs]
+
+        new_releases = [{
+            "id": r.id,
+            "title": r.title,
+            "artist": getattr(r, "artist", ""),
+            "thumbnail": getattr(r, "thumbnail", ""),
+            "release_date": getattr(r, "release_date", ""),
+            "source": getattr(r, "source", ""),
+            "yt_id": getattr(r, "yt_id", "")
+        } for r in new_releases_recs]
+
+        genres = [{
+            "id": r.id,
+            "genre_id": getattr(r, "genre_id", 0),
+            "name": getattr(r, "name", ""),
+            "picture": getattr(r, "picture", ""),
+            "tracks": getattr(r, "tracks", [])
+        } for r in genres_recs]
+
+        return {
+            "trending": trending,
+            "billboard": billboard,
+            "new_releases": new_releases,
+            "genres": genres,
+            "source": "pocketbase"
+        }
+    except Exception as e:
+        print(f"Warning: Failed to load explore data from PocketBase: {e}")
+        return None
+
+
+def load_explore_from_json() -> Optional[Dict[str, Any]]:
+    """Loads curated Explore data from local JSON fallback files."""
+    paths_to_check = [
+        "/var/mobile/music-data",
+        os.path.join(PROJECT_DIR, "music-data")
+    ]
+    for d in paths_to_check:
+        trending_file = os.path.join(d, "trending.json")
+        billboard_file = os.path.join(d, "billboard.json")
+        new_rel_file = os.path.join(d, "new_releases.json")
+        genres_file = os.path.join(d, "genres.json")
+
+        if os.path.exists(trending_file) and os.path.exists(billboard_file):
+            try:
+                with open(trending_file, "r", encoding="utf-8") as f:
+                    trending = json.load(f)
+                with open(billboard_file, "r", encoding="utf-8") as f:
+                    billboard = json.load(f)
+                new_releases = []
+                if os.path.exists(new_rel_file):
+                    with open(new_rel_file, "r", encoding="utf-8") as f:
+                        new_releases = json.load(f)
+                genres = []
+                if os.path.exists(genres_file):
+                    with open(genres_file, "r", encoding="utf-8") as f:
+                        genres = json.load(f)
+
+                return {
+                    "trending": trending,
+                    "billboard": billboard,
+                    "new_releases": new_releases,
+                    "genres": genres,
+                    "source": "fallback_json"
+                }
+            except Exception as e:
+                print(f"Warning: Failed to load explore JSON from {d}: {e}")
+    return None
+
+
+def load_explore_legacy() -> Dict[str, Any]:
+    """Emergency fallback to legacy YouTube Music scraper."""
+    trending = music_api.get_trending_tracks(limit=25)
+    new_releases = music_api.get_new_releases(limit=20)
+    moods_data = music_api.get_moods_and_genres()
+    return {
+        "trending": trending,
+        "billboard": [],
+        "new_releases": new_releases,
+        "genres": moods_data.get("genres", []),
+        "source": "legacy"
+    }
+
+
 # -------------------------------------------------------------
 # Music Discovery & Search Endpoints
 # -------------------------------------------------------------
 @app.get("/api/home")
 def get_home_feed():
-    """Fetches trending songs, new releases, featured playlists, and mood categories with 15-minute in-memory caching."""
+    """Fetches daily curated Explore feed (Trending, Billboard Hot 100, New Releases, Genres) from PocketBase with JSON fallback and in-memory caching."""
     now = time.time()
     with _CACHE_LOCK:
         if "home" in _CACHE and _CACHE["home"]["expires_at"] > now:
             return _CACHE["home"]["data"]
 
-    trending = music_api.get_trending_tracks(limit=25)
-    new_releases = music_api.get_new_releases(limit=20)
-    featured_playlists = music_api.get_featured_playlists(limit=10)
-    moods_data = music_api.get_moods_and_genres()
-    data = {
-        "trending": trending,
-        "new_releases": new_releases,
-        "featured_playlists": featured_playlists,
-        "moods": moods_data.get("moods", []),
-        "genres": moods_data.get("genres", []),
-    }
+    data = load_explore_from_pocketbase()
+    if not data:
+        data = load_explore_from_json()
+    if not data:
+        data = load_explore_legacy()
+
     with _CACHE_LOCK:
         _CACHE["home"] = {
             "data": data,
-            "expires_at": now + 900,
+            "expires_at": now + 600,
         }
     return data
+
+
+@app.get("/api/genre/{genre_id}/tracks")
+def get_genre_tracks(genre_id: int):
+    """Fetches curated top tracks for a Deezer genre."""
+    try:
+        pb = database.get_pb()
+        genre = pb.collection("genres").get_first_list_item(f"genre_id = {genre_id}")
+        if genre and getattr(genre, "tracks", None):
+            return {"genre_id": genre_id, "name": genre.name, "tracks": genre.tracks}
+    except Exception:
+        pass
+
+    data = load_explore_from_json()
+    if data and "genres" in data:
+        for g in data["genres"]:
+            if g.get("genre_id") == genre_id:
+                return {"genre_id": genre_id, "name": g.get("name"), "tracks": g.get("tracks", [])}
+
+    raise HTTPException(status_code=404, detail="Genre not found")
+
+
+@app.get("/api/resolve")
+def resolve_track(title: str = Query(..., min_length=1), artist: str = Query("", min_length=0)):
+    """Resolves an external song title + artist to a playable YouTube track ID with in-memory caching."""
+    clean_title = title.strip()
+    clean_artist = artist.strip()
+    cache_key = f"{clean_title.lower()}::{clean_artist.lower()}"
+
+    with _RESOLVE_LOCK:
+        if cache_key in _RESOLVE_CACHE:
+            return {"track": _RESOLVE_CACHE[cache_key], "cached": True}
+
+    query = f"{clean_title} {clean_artist}".strip()
+    resolved_track = None
+
+    # 1. Fast path: search YouTube Music songs (~250-300ms)
+    try:
+        results = music_api.search_music(query, filter_type="songs", limit=3)
+        if results:
+            first = results[0]
+            resolved_track = {
+                "id": first["id"],
+                "title": clean_title,
+                "artist": clean_artist or first.get("artist", ""),
+                "thumbnail": first.get("thumbnail") or "",
+                "duration": first.get("duration", "--:--")
+            }
+    except Exception as e:
+        print(f"music_api resolve failed for '{query}': {e}")
+
+    # 2. Resilient fallback: yt-dlp flat extract (~2s)
+    if not resolved_track:
+        try:
+            import yt_dlp
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': True,
+                'extractor_args': {'youtube': {'player_client': ['android', 'ios', 'mweb']}}
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                res = ydl.extract_info(f"ytsearch1:{query}", download=False)
+                if res and 'entries' in res and len(res['entries']) > 0:
+                    entry = res['entries'][0]
+                    resolved_track = {
+                        "id": entry["id"],
+                        "title": clean_title,
+                        "artist": clean_artist or "YouTube",
+                        "thumbnail": entry.get("thumbnails", [{}])[-1].get("url", "") if entry.get("thumbnails") else "",
+                        "duration": "--:--"
+                    }
+        except Exception as e:
+            print(f"yt-dlp resolve failed for '{query}': {e}")
+
+    if not resolved_track:
+        raise HTTPException(status_code=404, detail="Track could not be resolved on YouTube")
+
+    with _RESOLVE_LOCK:
+        _RESOLVE_CACHE[cache_key] = resolved_track
+
+    return {"track": resolved_track, "cached": False}
 
 
 @app.get("/api/search")
