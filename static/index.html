@@ -870,6 +870,10 @@
       return await fetch(url, options);
     }
 
+    function getUserPlaylistCacheKey() {
+      return currentUser && currentUser.id ? `spoti_user_pl_cache_${currentUser.id}` : 'spoti_user_pl_cache_guest';
+    }
+
     async function initAuth() {
       const token = localStorage.getItem('spoti_token');
       const nameDisplay = document.getElementById('user-name-display');
@@ -1063,9 +1067,11 @@
           return;
         }
 
-        localStorage.setItem('spoti_token', data.token);
-        localStorage.setItem('spoti_user', JSON.stringify({ id: data.id, username: data.username }));
+        userPlaylistsCache = [];
+        userLikedTrackIds.clear();
         currentUser = { id: data.id, username: data.username };
+        localStorage.setItem('spoti_token', data.token);
+        localStorage.setItem('spoti_user', JSON.stringify(currentUser));
         closeAuthModal();
         await initAuth();
         await loadUserPlaylists();
@@ -1080,10 +1086,17 @@
     }
 
     function handleLogout() {
+      if (currentUser && currentUser.id) {
+        localStorage.removeItem(`spoti_user_pl_cache_${currentUser.id}`);
+      }
+      localStorage.removeItem('spoti_user_playlists_cache');
       localStorage.removeItem('spoti_token');
       localStorage.removeItem('spoti_user');
       currentUser = null;
       userLikedTrackIds.clear();
+      userPlaylistsCache = [];
+      activePlaylistId = null;
+      activePlaylistIsUser = false;
       const menu = document.getElementById('user-dropdown-menu');
       if (menu) menu.classList.add('hidden');
       initAuth();
@@ -1309,21 +1322,26 @@
 
       try {
         let playlists = [];
+        let fetchSucceeded = false;
+
         if (navigator.onLine) {
           try {
             const res = await authFetch('/api/user-playlists');
             if (res.ok) {
               const data = await res.json();
               playlists = data.playlists || [];
-              localStorage.setItem('spoti_user_playlists_cache', JSON.stringify(playlists));
+              fetchSucceeded = true;
+              try {
+                localStorage.setItem(getUserPlaylistCacheKey(), JSON.stringify(playlists));
+              } catch (e) {}
             }
           } catch (err) {
-            console.warn("Online playlist fetch failed, falling back to cache:", err);
+            console.warn("Online playlist fetch failed, will try cache:", err);
           }
         }
 
-        if (playlists.length === 0) {
-          const cached = localStorage.getItem('spoti_user_playlists_cache');
+        if (!fetchSucceeded) {
+          const cached = localStorage.getItem(getUserPlaylistCacheKey());
           if (cached) {
             try { playlists = JSON.parse(cached); } catch (e) {}
           }
@@ -1342,21 +1360,13 @@
         }
 
         userPlaylistsCache = playlists;
+
+        // Custom playlists are user-created non-system playlists
+        const customPlaylists = playlists.filter(p => p.is_user_playlist && !p.is_system);
         const plCountEl = document.getElementById('user-pl-count');
-        if (plCountEl) plCountEl.innerText = userPlaylistsCache.length;
+        if (plCountEl) plCountEl.innerText = customPlaylists.length;
 
         container.innerHTML = '';
-        if (userPlaylistsCache.length === 0) {
-          container.innerHTML = `
-            <div class="col-span-full py-12 text-center text-gray-500 text-sm">
-              ${currentUser ? 'No playlists found.' : 'Log in to create your personal playlists & save favorites.'}<br>
-              <button onclick="openCreatePlaylistModal()" class="mt-3 text-xs bg-indigo-600/30 hover:bg-indigo-600/40 text-indigo-300 font-medium px-4 py-2 rounded-xl border border-indigo-500/20">
-                + Create Your First Playlist
-              </button>
-            </div>
-          `;
-          return;
-        }
 
         const offlineTracks = await SpotiDB.getAllTracks();
         const offlineCount = offlineTracks.length;
@@ -1419,6 +1429,19 @@
           `;
           container.appendChild(card);
         });
+
+        // If no custom playlists exist, display helpful empty state
+        if (customPlaylists.length === 0) {
+          const emptyCard = document.createElement('div');
+          emptyCard.className = "col-span-full py-8 text-center text-gray-500 text-xs";
+          emptyCard.innerHTML = `
+            ${currentUser ? 'No custom playlists yet.' : 'Log in to create personal playlists & save favorites.'}<br>
+            <button onclick="openCreatePlaylistModal()" class="mt-2.5 text-xs bg-indigo-600/30 hover:bg-indigo-600/40 text-indigo-300 font-medium px-3.5 py-1.5 rounded-xl border border-indigo-500/20">
+              + Create Your First Playlist
+            </button>
+          `;
+          container.appendChild(emptyCard);
+        }
 
       } catch (e) {
         console.error("loadUserPlaylists error:", e);
@@ -1574,10 +1597,13 @@
     async function removeTrackFromCustomPlaylist(playlistId, trackId, event) {
       if (event) event.stopPropagation();
       try {
-        await authFetch(`/api/user-playlists/${playlistId}/tracks/${trackId}`, { method: 'DELETE' });
-        showToast("Track removed from playlist");
-        openPlaylist(playlistId, true);
-        loadUserPlaylists();
+        const res = await authFetch(`/api/user-playlists/${playlistId}/tracks/${trackId}`, { method: 'DELETE' });
+        if (res.ok) {
+          showToast("Track removed from playlist");
+          openPlaylist(playlistId, true);
+        } else {
+          showToast("Failed to remove track");
+        }
       } catch (e) {
         showToast("Failed to remove track");
       }
@@ -1586,11 +1612,18 @@
     async function deleteCurrentCustomPlaylist() {
       if (!activePlaylistId || !confirm("Are you sure you want to delete this playlist?")) return;
       try {
-        await authFetch(`/api/user-playlists/${activePlaylistId}`, { method: 'DELETE' });
+        const deletedId = activePlaylistId;
+        const res = await authFetch(`/api/user-playlists/${deletedId}`, { method: 'DELETE' });
+        if (!res.ok) {
+          showToast("Failed to delete playlist");
+          return;
+        }
         showToast("Playlist deleted");
+        activePlaylistId = null;
+        activePlaylistIsUser = false;
         switchTab('library');
-        loadUserPlaylists();
       } catch (e) {
+        console.error("Error deleting playlist:", e);
         showToast("Failed to delete playlist");
       }
     }

@@ -37,7 +37,7 @@ def get_all_playlists(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     except Exception as e:
         print(f"Error initializing offline playlist entry: {e}", file=sys.stderr)
 
-    if not user_id:
+    if not user_id or not str(user_id).strip() or len(str(user_id).strip()) < 5:
         return result
 
     # 2. Include User's Liked Songs playlist
@@ -280,8 +280,11 @@ def delete_playlist(playlist_id: str, user_id: Optional[str] = None) -> bool:
     admin_pb = database.get_admin_pb()
     try:
         if user_id:
-            pl = admin_pb.collection("playlists").get_one(playlist_id)
-            if pl.user != user_id:
+            try:
+                pl = admin_pb.collection("playlists").get_one(playlist_id)
+                if not pl or pl.user != user_id:
+                    return False
+            except Exception:
                 return False
 
         admin_pb.collection("playlists").delete(playlist_id)
