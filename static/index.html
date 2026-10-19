@@ -284,7 +284,7 @@
 
       <!-- Subview: Custom User Playlists -->
       <div id="library-playlists-view" class="space-y-3">
-        <div id="user-playlists-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5">
+        <div id="user-playlists-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
           <!-- Playlists injected here -->
         </div>
       </div>
@@ -305,7 +305,12 @@
       </button>
 
       <div class="flex items-center gap-4 bg-white/5 p-4 rounded-2xl relative">
-        <img id="pl-cover" class="w-20 h-20 rounded-xl object-cover shadow" src="" alt="Cover">
+        <div class="relative w-20 h-20 rounded-xl overflow-hidden bg-white/5 shrink-0 shadow flex items-center justify-center">
+          <img id="pl-cover" class="w-full h-full object-cover" src="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="Cover">
+          <div class="w-full h-full bg-gradient-to-br from-indigo-600/40 to-purple-600/40 flex items-center justify-center text-indigo-300" style="display:none;">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+          </div>
+        </div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2">
             <h2 id="pl-title" class="font-bold text-base text-white line-clamp-1">Playlist</h2>
@@ -399,7 +404,7 @@
         <button id="drawer-like-btn" onclick="toggleLikeCurrentTrack()" class="p-2 text-gray-400 hover:text-red-400 rounded-full bg-white/5" title="Like Song">
           <svg id="drawer-like-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
         </button>
-        <button onclick="promptDownloadTrack(currentTrack)" class="p-2 text-gray-400 hover:text-white rounded-full bg-white/5" title="Download / Add to Playlist">
+        <button id="drawer-download-btn" onclick="promptDownloadTrack(currentTrack)" class="p-2 text-gray-400 hover:text-white rounded-full bg-white/5" title="Download / Add to Playlist">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
         </button>
       </div>
@@ -415,11 +420,10 @@
     <!-- Track Info & Controls -->
     <div class="space-y-5 shrink-0 max-w-lg mx-auto w-full">
       <div class="flex items-center justify-between">
-        <div class="min-w-0 flex-1 pr-4">
+        <div class="min-w-0 flex-1">
           <h1 id="drawer-title" class="text-xl font-bold text-white line-clamp-1">Song Title</h1>
           <p id="drawer-artist" class="text-sm text-gray-400 line-clamp-1 mt-0.5">Artist Name</p>
         </div>
-        <span id="drawer-dl-badge" class="text-[11px] bg-white/10 text-gray-300 px-2.5 py-1 rounded-full">Stream</span>
       </div>
 
       <!-- Scrubber Bar -->
@@ -1302,10 +1306,42 @@
       container.innerHTML = '<div class="col-span-full py-6 text-center text-gray-400 text-sm">Loading playlists...</div>';
 
       try {
-        const res = await authFetch('/api/user-playlists');
-        const data = await res.json();
-        userPlaylistsCache = data.playlists || [];
-        document.getElementById('user-pl-count').innerText = userPlaylistsCache.length;
+        let playlists = [];
+        if (navigator.onLine) {
+          try {
+            const res = await authFetch('/api/user-playlists');
+            if (res.ok) {
+              const data = await res.json();
+              playlists = data.playlists || [];
+              localStorage.setItem('spoti_user_playlists_cache', JSON.stringify(playlists));
+            }
+          } catch (err) {
+            console.warn("Online playlist fetch failed, falling back to cache:", err);
+          }
+        }
+
+        if (playlists.length === 0) {
+          const cached = localStorage.getItem('spoti_user_playlists_cache');
+          if (cached) {
+            try { playlists = JSON.parse(cached); } catch (e) {}
+          }
+        }
+
+        // Always ensure Downloaded Songs virtual playlist exists, even offline
+        if (!playlists.some(p => p.id === 'user_pl_offline_downloads')) {
+          playlists.unshift({
+            id: 'user_pl_offline_downloads',
+            title: 'Downloaded Songs',
+            description: 'Songs saved on this device (offline)',
+            is_offline_playlist: true,
+            is_system: true,
+            track_count: 0
+          });
+        }
+
+        userPlaylistsCache = playlists;
+        const plCountEl = document.getElementById('user-pl-count');
+        if (plCountEl) plCountEl.innerText = userPlaylistsCache.length;
 
         container.innerHTML = '';
         if (userPlaylistsCache.length === 0) {
@@ -1320,38 +1356,68 @@
           return;
         }
 
-        const offlineCount = await SpotiDB.count();
+        const offlineTracks = await SpotiDB.getAllTracks();
+        const offlineCount = offlineTracks.length;
 
         userPlaylistsCache.forEach(pl => {
-          const card = document.createElement('div');
-          card.className = "glass-card p-2.5 rounded-2xl flex flex-col gap-2 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group relative";
-          card.onclick = () => openPlaylist(pl.id, true);
-
-          let badgeText = `${pl.track_count} ${pl.track_count === 1 ? 'song' : 'songs'}`;
+          let badgeText = `${pl.track_count || 0} ${pl.track_count === 1 ? 'song' : 'songs'}`;
           let descText = pl.description || 'Custom Playlist';
-          if (pl.is_liked_playlist) {
-            badgeText = `❤️ ${pl.track_count} favorites`;
-          } else if (pl.is_offline_playlist) {
-            badgeText = `⬇️ ${offlineCount} on device`;
+          let thumbMarkup = '';
+
+          if (pl.is_offline_playlist) {
+            badgeText = `${offlineCount} on device`;
             descText = `${offlineCount} songs saved on this device (offline)`;
+            const firstThumb = (offlineTracks.length > 0 && offlineTracks[0].thumbnail) ? offlineTracks[0].thumbnail : '';
+            if (firstThumb) {
+              thumbMarkup = `
+                <img src="${firstThumb}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">
+                <div class="w-full h-full bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white" style="display:none;">
+                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                </div>
+              `;
+            } else {
+              thumbMarkup = `
+                <div class="w-full h-full bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white">
+                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                </div>
+              `;
+            }
+          } else if (pl.is_liked_playlist) {
+            badgeText = `❤️ ${pl.track_count || 0} favorites`;
+            thumbMarkup = `
+              ${pl.thumbnail ? `<img src="${pl.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">` : ''}
+              <div class="w-full h-full bg-gradient-to-br from-rose-600 to-pink-600 flex items-center justify-center text-white" style="${pl.thumbnail ? 'display:none;' : ''}">
+                <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+              </div>
+            `;
+          } else {
+            // Custom user playlist
+            thumbMarkup = `
+              ${pl.thumbnail ? `<img src="${pl.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">` : ''}
+              <div class="w-full h-full bg-gradient-to-br from-indigo-600/40 to-purple-600/40 flex items-center justify-center text-indigo-300" style="${pl.thumbnail ? 'display:none;' : ''}">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+              </div>
+            `;
           }
 
+          const card = document.createElement('div');
+          card.className = "glass-card p-2.5 rounded-2xl flex items-center gap-3 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
+          card.onclick = () => openPlaylist(pl.id, true);
           card.innerHTML = `
-            <div class="w-full aspect-square rounded-xl overflow-hidden bg-black/40 relative">
-              <img src="${pl.thumbnail}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" alt="pl" loading="lazy">
-              <div class="absolute bottom-2 left-2 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-md text-[10px] text-white font-medium">
-                ${badgeText}
-              </div>
+            <div class="relative w-14 h-14 rounded-xl overflow-hidden bg-white/5 shrink-0 shadow flex items-center justify-center">
+              ${thumbMarkup}
             </div>
-            <div class="min-w-0">
+            <div class="min-w-0 flex-1">
               <div class="text-sm font-semibold text-white line-clamp-1">${pl.title}</div>
-              <div class="text-xs text-gray-400 line-clamp-1">${descText}</div>
+              <div class="text-xs text-indigo-400 line-clamp-1 mt-0.5">${badgeText}</div>
             </div>
+            <span class="text-xs text-gray-400 p-2">▶</span>
           `;
           container.appendChild(card);
         });
 
       } catch (e) {
+        console.error("loadUserPlaylists error:", e);
         container.innerHTML = '<div class="col-span-full py-6 text-center text-red-400 text-xs">Failed to load playlists.</div>';
       }
     }
@@ -2184,7 +2250,14 @@
       document.getElementById('drawer-title').innerText = track.title;
       document.getElementById('drawer-artist').innerText = track.artist;
       document.getElementById('drawer-thumb').src = track.thumbnail;
-      document.getElementById('drawer-dl-badge').innerText = track.is_local ? 'Offline MP3' : 'Streaming';
+
+      // Dynamic download button visibility in now playing drawer:
+      // Hide if already downloaded to phone, show if streaming so user can listen first then download
+      const isDownloaded = offlineTrackIdSet.has(track.id) || !!track.blob || !!track.is_local;
+      const dlBtn = document.getElementById('drawer-download-btn');
+      if (dlBtn) {
+        dlBtn.classList.toggle('hidden', isDownloaded);
+      }
 
       updateMediaSession(track);
     }
@@ -2433,6 +2506,12 @@
                 // Morph ring into completed green checkmark
                 updateDownloadProgressUI(id, 100, 'completed');
 
+                // If currently playing in drawer, hide the download button immediately
+                const drawerDlBtn = document.getElementById('drawer-download-btn');
+                if (drawerDlBtn && currentTrack && currentTrack.id === id) {
+                  drawerDlBtn.classList.add('hidden');
+                }
+
                 // Suppress success / cleanup toast bubbles as requested
                 if (typeof loadLibrary === 'function') loadLibrary();
                 if (typeof loadUserPlaylists === 'function') loadUserPlaylists();
@@ -2464,6 +2543,10 @@
         await SpotiDB.deleteTrack(id);
         await refreshOfflineTrackIds();
         showToast(`🗑️ Removed "${title}" from this device`);
+        const drawerDlBtn = document.getElementById('drawer-download-btn');
+        if (drawerDlBtn && currentTrack && currentTrack.id === id) {
+          drawerDlBtn.classList.remove('hidden');
+        }
         if (activePlaylistId === 'user_pl_offline_downloads') {
           openPlaylist('user_pl_offline_downloads', true);
         }
