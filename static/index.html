@@ -128,6 +128,7 @@
       <span class="font-bold text-lg tracking-tight text-white">
         Spoti
       </span>
+      <span id="offline-badge" class="hidden text-[10px] font-semibold text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30">Offline</span>
     </div>
     <div class="flex items-center gap-2">
       <!-- User Profile / Login Button -->
@@ -167,7 +168,30 @@
     
     <!-- TAB: HOME / EXPLORE -->
     <section id="tab-home" class="space-y-6">
-      <!-- 1. Trending Hits -->
+      <!-- 1. Moods & Genres (Top) -->
+      <div>
+        <h2 class="text-lg font-bold text-white mb-3 flex items-center gap-2">
+          <span>🎧</span> Moods & Genres
+        </h2>
+        <div id="moods-container" class="flex gap-2 overflow-x-auto pb-2 scrollbar-none"></div>
+        <div id="mood-playlists-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5 mt-3 hidden"></div>
+      </div>
+
+      <!-- 2. Top Charts & Featured Playlists -->
+      <div>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <span>🏆</span> Top Charts & Playlists
+          </h2>
+          <span class="text-xs text-gray-400">Curated collections</span>
+        </div>
+        <div id="featured-playlists-container" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
+        </div>
+      </div>
+
+      <!-- 3. Trending Hits -->
       <div>
         <div class="flex items-center justify-between mb-3">
           <h2 class="text-lg font-bold text-white flex items-center gap-2">
@@ -183,7 +207,7 @@
         </div>
       </div>
 
-      <!-- 2. New Releases -->
+      <!-- 4. New Releases -->
       <div>
         <div class="flex items-center justify-between mb-3">
           <h2 class="text-lg font-bold text-white flex items-center gap-2">
@@ -197,29 +221,6 @@
           <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
           <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
         </div>
-      </div>
-
-      <!-- 3. Top Charts & Featured Playlists -->
-      <div>
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-bold text-white flex items-center gap-2">
-            <span>🏆</span> Top Charts & Playlists
-          </h2>
-          <span class="text-xs text-gray-400">Curated collections</span>
-        </div>
-        <div id="featured-playlists-container" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
-          <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
-        </div>
-      </div>
-
-      <!-- 4. Moods & Genres -->
-      <div>
-        <h2 class="text-lg font-bold text-white mb-3 flex items-center gap-2">
-          <span>🎧</span> Moods & Genres
-        </h2>
-        <div id="moods-container" class="flex gap-2 overflow-x-auto pb-2 scrollbar-none"></div>
-        <div id="mood-playlists-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5 mt-3 hidden"></div>
       </div>
     </section>
 
@@ -347,10 +348,18 @@
           <div id="mini-artist" class="text-xs text-gray-400 line-clamp-1">Artist Name</div>
         </div>
       </div>
-      <div class="flex items-center gap-1.5" onclick="event.stopPropagation()">
+      <div class="flex items-center gap-0.5 sm:gap-1" onclick="event.stopPropagation()">
+        <!-- Previous Track -->
+        <button id="mini-prev-btn" onclick="playPrev()" class="p-2 text-gray-300 hover:text-white active:scale-90 transition rounded-full hover:bg-white/5" title="Previous Track">
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        </button>
         <!-- Play / Pause -->
-        <button id="mini-play-btn" onclick="togglePlayPause()" class="w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 flex items-center justify-center text-white shadow-lg shadow-indigo-600/30">
-          <svg id="mini-play-icon" class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        <button id="mini-play-btn" onclick="togglePlayPause()" class="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 active:scale-95 flex items-center justify-center text-white shadow-lg shadow-indigo-600/30 transition shrink-0" title="Play/Pause">
+          <svg id="mini-play-icon" class="w-4 h-4 sm:w-5 sm:h-5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <!-- Next Track -->
+        <button id="mini-next-btn" onclick="playNext()" class="p-2 text-gray-300 hover:text-white active:scale-90 transition rounded-full hover:bg-white/5" title="Next Track">
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
         </button>
       </div>
     </div>
@@ -740,7 +749,9 @@
     };
 
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/static/sw.js').catch(err => console.log('SW error:', err));
+      navigator.serviceWorker.register('/sw.js', { scope: '/' })
+        .then(reg => console.log('[Spoti SW] Active with scope:', reg.scope))
+        .catch(err => console.warn('[Spoti SW] Registration failed:', err));
     }
 
     async function authFetch(url, options = {}) {
@@ -1067,15 +1078,53 @@
 
     window.addEventListener('DOMContentLoaded', async () => {
       window.scrollTo(0, 0);
-      const loggedIn = await initAuth();
-      if (!loggedIn) {
-        openAuthModal('login', true);
+
+      // Check online connectivity
+      const isOnline = navigator.onLine;
+      if (!isOnline) {
+        enterOfflineMode();
+      } else {
+        const loggedIn = await initAuth();
+        if (!loggedIn && navigator.onLine) {
+          openAuthModal('login', true);
+        } else if (!loggedIn && !navigator.onLine) {
+          enterOfflineMode();
+        }
+        loadTrending();
+        loadServerInfo();
+        loadUserPlaylists();
       }
-      loadTrending();
-      loadServerInfo();
-      loadUserPlaylists();
+
       setupAudioEvents();
       setupMediaSession();
+    });
+
+    function enterOfflineMode() {
+      closeAuthModal();
+      const badge = document.getElementById('offline-badge');
+      if (badge) badge.classList.remove('hidden');
+
+      switchTab('library');
+      switchLibrarySubtab('offline');
+      loadLibrary();
+      showToast('⚡ Offline Mode: Playing songs downloaded to your phone');
+    }
+
+    function exitOfflineMode() {
+      const badge = document.getElementById('offline-badge');
+      if (badge) badge.classList.add('hidden');
+      showToast('🌐 Reconnected to server');
+      initAuth();
+      loadTrending();
+      loadUserPlaylists();
+    }
+
+    window.addEventListener('offline', () => {
+      enterOfflineMode();
+    });
+
+    window.addEventListener('online', () => {
+      exitOfflineMode();
     });
 
     // Prevent document-level scroll drift in iOS PWA standalone mode
@@ -1096,6 +1145,13 @@
     }
 
     function switchTab(tab) {
+      if (tab === 'home' && !navigator.onLine) {
+        showToast('⚡ Explore is unavailable offline. Showing downloaded library.');
+        switchTab('library');
+        switchLibrarySubtab('offline');
+        return;
+      }
+
       activeTab = tab;
       ['home', 'search', 'library', 'playlist'].forEach(t => {
         const el = document.getElementById(`tab-${t}`);
@@ -1377,6 +1433,16 @@
       const trendingContainer = document.getElementById('trending-container');
       const newReleasesContainer = document.getElementById('new-releases-container');
       const featuredContainer = document.getElementById('featured-playlists-container');
+      const moodsContainer = document.getElementById('moods-container');
+
+      if (moodsContainer && moodsContainer.children.length === 0) {
+        moodsContainer.innerHTML = `
+          <div class="w-20 h-8 rounded-xl bg-white/5 animate-pulse shrink-0"></div>
+          <div class="w-24 h-8 rounded-xl bg-white/5 animate-pulse shrink-0"></div>
+          <div class="w-28 h-8 rounded-xl bg-white/5 animate-pulse shrink-0"></div>
+          <div class="w-20 h-8 rounded-xl bg-white/5 animate-pulse shrink-0"></div>
+        `;
+      }
 
       if (trendingContainer) {
         trendingContainer.innerHTML = `
@@ -1491,7 +1557,9 @@
         }
 
       } catch (e) {
-        if (trendingContainer) {
+        if (!navigator.onLine) {
+          enterOfflineMode();
+        } else if (trendingContainer) {
           trendingContainer.innerHTML = `<div class="col-span-full py-8 text-center text-gray-400 text-sm">Failed to load explore feed. Tap refresh.</div>`;
         }
       }
@@ -1948,7 +2016,9 @@
       if (queueIndex === -1) queueIndex = 0;
 
       await loadAndPlayTrack(track);
-      fetchRadioRecommendations(track.id);
+      if (navigator.onLine) {
+        fetchRadioRecommendations(track.id);
+      }
     }
 
     async function loadAndPlayTrack(track) {
@@ -1976,6 +2046,10 @@
           audio.src = track.url;
         } else {
           // Stream online from server
+          if (!navigator.onLine) {
+            showToast('⚠️ Streaming unavailable while offline. Select a downloaded song.');
+            return;
+          }
           const res = await fetch(`/api/stream/${track.id}`);
           const data = await res.json();
           audio.src = data.url;
@@ -2116,6 +2190,7 @@
     }
 
     async function fetchRadioRecommendations(videoId) {
+      if (!navigator.onLine) return;
       try {
         const res = await fetch(`/api/radio/${videoId}`);
         const data = await res.json();

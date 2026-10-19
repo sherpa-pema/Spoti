@@ -412,12 +412,36 @@ os.makedirs(static_dir, exist_ok=True)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
+@app.get("/sw.js")
+def serve_service_worker():
+    sw_file = os.path.join(static_dir, "sw.js")
+    if os.path.isfile(sw_file):
+        return FileResponse(
+            sw_file,
+            media_type="application/javascript",
+            headers={
+                "Service-Worker-Allowed": "/",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+            },
+        )
+    raise HTTPException(status_code=404, detail="sw.js not found")
+
+
+@app.get("/manifest.json")
+def serve_manifest():
+    manifest_file = os.path.join(static_dir, "manifest.json")
+    if os.path.isfile(manifest_file):
+        return FileResponse(manifest_file, media_type="application/manifest+json")
+    raise HTTPException(status_code=404, detail="manifest.json not found")
+
+
 @app.get("/")
 def serve_index():
     index_file = os.path.join(static_dir, "index.html")
     if os.path.isfile(index_file):
         return FileResponse(index_file)
     return JSONResponse({"status": "Server running", "message": "index.html not found"})
+
 
 
 if __name__ == "__main__":
