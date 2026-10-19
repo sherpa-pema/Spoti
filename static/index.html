@@ -348,18 +348,18 @@
           <div id="mini-artist" class="text-xs text-gray-400 line-clamp-1">Artist Name</div>
         </div>
       </div>
-      <div class="flex items-center gap-0.5 sm:gap-1" onclick="event.stopPropagation()">
+      <div class="flex items-center gap-1 sm:gap-2" onclick="event.stopPropagation()">
         <!-- Previous Track -->
-        <button id="mini-prev-btn" onclick="playPrev()" class="p-2 text-gray-300 hover:text-white active:scale-90 transition rounded-full hover:bg-white/5" title="Previous Track">
-          <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        <button id="mini-prev-btn" onclick="playPrev()" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 active:scale-90 flex items-center justify-center text-white transition shrink-0" title="Previous Track">
+          <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
         </button>
         <!-- Play / Pause -->
-        <button id="mini-play-btn" onclick="togglePlayPause()" class="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 active:scale-95 flex items-center justify-center text-white shadow-lg shadow-indigo-600/30 transition shrink-0" title="Play/Pause">
-          <svg id="mini-play-icon" class="w-4 h-4 sm:w-5 sm:h-5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        <button id="mini-play-btn" onclick="togglePlayPause()" class="w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 active:scale-95 flex items-center justify-center text-white shadow-lg shadow-indigo-600/30 transition shrink-0" title="Play/Pause">
+          <svg id="mini-play-icon" class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
         </button>
         <!-- Next Track -->
-        <button id="mini-next-btn" onclick="playNext()" class="p-2 text-gray-300 hover:text-white active:scale-90 transition rounded-full hover:bg-white/5" title="Next Track">
-          <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+        <button id="mini-next-btn" onclick="playNext()" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 active:scale-90 flex items-center justify-center text-white transition shrink-0" title="Next Track">
+          <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
         </button>
       </div>
     </div>
@@ -634,6 +634,7 @@
     let userLikedTrackIds = new Set();
     let authMode = 'login';
     let currentBlobUrl = null;
+    let offlineTrackIdSet = new Set();
 
     // -------------------------------------------------------------
     // Client-Side Offline Storage Engine (IndexedDB)
@@ -747,6 +748,102 @@
         }
       }
     };
+
+    async function refreshOfflineTrackIds() {
+      try {
+        const tracks = await SpotiDB.getAllTracks();
+        offlineTrackIdSet = new Set(tracks.map(t => t.id));
+      } catch (e) {
+        offlineTrackIdSet = new Set();
+      }
+    }
+
+    async function convertImageUrlToBase64(url) {
+      if (!url || typeof url !== 'string' || url.startsWith('data:')) return url;
+      try {
+        const res = await fetch(url, { mode: 'cors' });
+        if (!res.ok) return url;
+        const blob = await res.blob();
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.onerror = () => resolve(url);
+          reader.readAsDataURL(blob);
+        });
+      } catch (e) {
+        console.warn("Base64 image conversion error:", e);
+        return url;
+      }
+    }
+
+    async function migrateOfflineThumbnails() {
+      if (!navigator.onLine) return;
+      try {
+        const tracks = await SpotiDB.getAllTracks();
+        for (const t of tracks) {
+          if (t.thumbnail && t.thumbnail.startsWith('http')) {
+            const b64 = await convertImageUrlToBase64(t.thumbnail);
+            if (b64 && b64.startsWith('data:')) {
+              t.thumbnail = b64;
+              await SpotiDB.saveTrack(t);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Thumbnail migration error:", e);
+      }
+    }
+
+    function renderDownloadBtnHtml(track) {
+      const isDownloaded = offlineTrackIdSet.has(track.id);
+      if (isDownloaded) {
+        return `
+          <div data-dl-btn="${track.id}" class="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0" title="Saved to device">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+          </div>
+        `;
+      }
+      return `
+        <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(track)})" data-dl-btn="${track.id}" class="w-8 h-8 rounded-full bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0 active:scale-95" title="Download / Add to Playlist">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        </button>
+      `;
+    }
+
+    function updateDownloadProgressUI(trackId, percent, status) {
+      const elements = document.querySelectorAll(`[data-dl-btn="${trackId}"]`);
+      if (!elements || elements.length === 0) return;
+
+      const pct = Math.max(0, Math.min(100, Math.round(percent || 0)));
+      const circumference = 87.96;
+      const offset = circumference - (circumference * pct / 100);
+
+      elements.forEach(el => {
+        if (status === 'completed') {
+          el.outerHTML = `
+            <div data-dl-btn="${trackId}" class="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 transition duration-300 animate-pulse" title="Saved to device">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+            </div>
+          `;
+        } else if (status === 'error') {
+          el.outerHTML = `
+            <button onclick="event.stopPropagation(); promptDownloadTrack({id: '${trackId}'})" data-dl-btn="${trackId}" class="w-8 h-8 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center shrink-0 active:scale-95" title="Download failed. Tap to retry.">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            </button>
+          `;
+        } else {
+          el.outerHTML = `
+            <div data-dl-btn="${trackId}" class="relative w-8 h-8 flex items-center justify-center shrink-0" title="Downloading ${pct}%">
+              <svg class="w-8 h-8 -rotate-90" viewBox="0 0 36 36">
+                <circle cx="18" cy="18" r="14" fill="none" stroke="currentColor" stroke-width="3" class="text-white/10" />
+                <circle cx="18" cy="18" r="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" class="text-indigo-400 transition-all duration-300" stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" />
+              </svg>
+              <span class="absolute text-[8px] font-bold text-indigo-300 font-mono tracking-tighter">${pct}%</span>
+            </div>
+          `;
+        }
+      });
+    }
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js', { scope: '/' })
@@ -1079,11 +1176,14 @@
     window.addEventListener('DOMContentLoaded', async () => {
       window.scrollTo(0, 0);
 
+      await refreshOfflineTrackIds();
+
       // Check online connectivity
       const isOnline = navigator.onLine;
       if (!isOnline) {
         enterOfflineMode();
       } else {
+        migrateOfflineThumbnails();
         const loggedIn = await initAuth();
         if (!loggedIn && navigator.onLine) {
           openAuthModal('login', true);
@@ -1330,7 +1430,7 @@
       if (!trackPendingAddToPlaylist) return;
       const t = trackPendingAddToPlaylist;
       closeAddToPlaylistModal();
-      downloadSingleTrack(t.id, t.title, t.artist);
+      downloadSingleTrack(t.id, t.title, t.artist, t.thumbnail);
       trackPendingAddToPlaylist = null;
     }
 
@@ -1392,9 +1492,8 @@
           })
         });
         closeAddToPlaylistModal();
-        showToast(`✓ Saved to "${playlistName}" & downloading to phone!`);
         // Start device IndexedDB download simultaneously
-        downloadSingleTrack(track.id, track.title, track.artist);
+        downloadSingleTrack(track.id, track.title, track.artist, track.thumbnail);
         trackPendingAddToPlaylist = null;
         loadUserPlaylists();
       } catch (e) {
@@ -1489,9 +1588,7 @@
                 <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
                 <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
               </div>
-              <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(track)})" class="w-8 h-8 rounded-full bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0 active:scale-95" title="Download / Add to Playlist">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-              </button>
+              ${renderDownloadBtnHtml(track)}
             `;
             trendingContainer.appendChild(card);
           });
@@ -1516,9 +1613,7 @@
                 <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
                 <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
               </div>
-              <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(track)})" class="w-8 h-8 rounded-full bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0 active:scale-95" title="Download / Add to Playlist">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-              </button>
+              ${renderDownloadBtnHtml(track)}
             `;
             newReleasesContainer.appendChild(card);
           });
@@ -1763,20 +1858,23 @@
             const isLiked = userLikedTrackIds.has(item.id);
             row.onclick = () => playTrackFromList(item, data.results.filter(r => r.type === 'song'));
             row.innerHTML = `
-              <img src="${item.thumbnail}" class="w-12 h-12 rounded-lg object-cover" alt="thumb">
+              <div class="relative w-12 h-12 rounded-lg overflow-hidden bg-white/5 shrink-0 flex items-center justify-center">
+                ${item.thumbnail ? `<img src="${item.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="art">` : ''}
+                <div class="w-full h-full bg-gradient-to-br from-indigo-600/30 to-purple-600/30 flex items-center justify-center text-indigo-300" style="${item.thumbnail ? 'display:none;' : ''}">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+                </div>
+              </div>
               <div class="min-w-0 flex-1">
                 <div class="text-sm font-semibold text-white line-clamp-1">${item.title}</div>
                 <div class="text-xs text-gray-400 line-clamp-1">${item.artist} • ${item.duration}</div>
               </div>
-              <div class="flex items-center gap-1">
+              <div class="flex items-center gap-1.5">
                 <!-- Like -->
                 <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(item)}, event)" class="p-2 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
                   <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
                 </button>
-                <!-- Unified Download / Add to Playlist (Only button) -->
-                <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(item)})" class="p-2 text-gray-400 hover:text-white" title="Download / Add to Playlist">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                </button>
+                <!-- Unified Download / Add to Playlist / Progress Ring -->
+                ${renderDownloadBtnHtml(item)}
               </div>
             `;
           }
@@ -1822,28 +1920,24 @@
         }
 
         offlineTracks.forEach((t, i) => {
-          const isLiked = userLikedTrackIds.has(t.id);
           const row = document.createElement('div');
           row.className = "glass-card p-2.5 rounded-xl flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer";
           row.onclick = () => playTrackFromList(t, offlineTracks);
           row.innerHTML = `
             <span class="text-xs font-mono text-gray-500 w-4">${i + 1}</span>
-            <img src="${t.thumbnail || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'}" class="w-10 h-10 rounded-lg object-cover" alt="thumb">
+            <div class="relative w-10 h-10 rounded-lg overflow-hidden bg-white/5 shrink-0 flex items-center justify-center">
+              ${t.thumbnail ? `<img src="${t.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="art">` : ''}
+              <div class="w-full h-full bg-gradient-to-br from-indigo-600/30 to-purple-600/30 flex items-center justify-center text-indigo-300" style="${t.thumbnail ? 'display:none;' : ''}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+              </div>
+            </div>
             <div class="min-w-0 flex-1">
               <div class="text-sm font-semibold text-white line-clamp-1">${t.title}</div>
               <div class="text-xs text-gray-400 line-clamp-1">${t.artist} • ${t.sizeFormatted || 'Offline'}</div>
             </div>
             <div class="flex items-center gap-1">
-              <!-- Like -->
-              <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(t)}, event)" class="p-1.5 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
-                <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
-              </button>
-              <!-- Save to Playlist -->
-              <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(t)})" class="p-1.5 text-gray-400 hover:text-white" title="Save to Playlist">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-              </button>
-              <!-- Delete from Device -->
-              <button onclick="event.stopPropagation(); deleteOfflineTrack('${t.id}', '${escapeQuotes(t.title)}')" class="p-1.5 text-red-400 hover:text-red-300" title="Delete from Device">
+              <!-- Delete from Device (Only action needed since already downloaded) -->
+              <button onclick="event.stopPropagation(); deleteOfflineTrack('${t.id}', '${escapeQuotes(t.title)}')" class="p-2 text-red-400 hover:text-red-300 active:scale-95 transition" title="Delete from Device">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
               </button>
             </div>
@@ -1867,31 +1961,46 @@
         }
 
         data.tracks.forEach((t, i) => {
+          const isDownloaded = offlineTrackIdSet.has(t.id);
           const isLiked = userLikedTrackIds.has(t.id);
           const row = document.createElement('div');
           row.className = "glass-card p-2.5 rounded-xl flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer";
           row.onclick = () => playTrackFromList(t, data.tracks);
+
+          let actionButtonsHtml = '';
+          if (isUserPlaylist) {
+            // User custom playlist: remove like and download buttons
+            // If downloaded, show green "On Phone" badge. Always offer remove from playlist option.
+            actionButtonsHtml = `
+              ${isDownloaded ? '<span class="text-xs text-emerald-400 font-medium px-2 py-0.5 bg-emerald-500/10 rounded-md">On Phone</span>' : ''}
+              <button onclick="event.stopPropagation(); removeTrackFromCustomPlaylist('${playlistId}', '${t.id}', event)" class="p-2 text-red-400 hover:text-red-300 active:scale-95 transition" title="Remove from Playlist">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              </button>
+            `;
+          } else {
+            // System / Explore playlist: show like and download (or saved checkmark)
+            actionButtonsHtml = `
+              <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(t)}, event)" class="p-1.5 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
+                <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+              </button>
+              ${renderDownloadBtnHtml(t)}
+            `;
+          }
+
           row.innerHTML = `
             <span class="text-xs font-mono text-gray-500 w-4">${i + 1}</span>
-            <img src="${t.thumbnail}" class="w-10 h-10 rounded-lg object-cover" alt="thumb">
+            <div class="relative w-10 h-10 rounded-lg overflow-hidden bg-white/5 shrink-0 flex items-center justify-center">
+              ${t.thumbnail ? `<img src="${t.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="art">` : ''}
+              <div class="w-full h-full bg-gradient-to-br from-indigo-600/30 to-purple-600/30 flex items-center justify-center text-indigo-300" style="${t.thumbnail ? 'display:none;' : ''}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+              </div>
+            </div>
             <div class="min-w-0 flex-1">
               <div class="text-sm font-semibold text-white line-clamp-1">${t.title}</div>
               <div class="text-xs text-gray-400 line-clamp-1">${t.artist}</div>
             </div>
-            <div class="flex items-center gap-1">
-              <!-- Like -->
-              <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(t)}, event)" class="p-1.5 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
-                <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
-              </button>
-              <!-- Unified Download / Add to Playlist (Only button) -->
-              <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(t)})" class="p-1.5 text-gray-400 hover:text-white" title="Download / Add to Playlist">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-              </button>
-              ${isUserPlaylist && !isSystemVirtual ? `
-                <button onclick="removeTrackFromCustomPlaylist('${playlistId}', '${t.id}', event)" class="p-1.5 text-red-400 hover:text-red-300" title="Remove from Playlist">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                </button>
-              ` : ''}
+            <div class="flex items-center gap-1.5">
+              ${actionButtonsHtml}
             </div>
           `;
           trackList.appendChild(row);
@@ -1974,28 +2083,26 @@
         }
 
         tracks.forEach(track => {
-          const isLiked = userLikedTrackIds.has(track.id);
           const row = document.createElement('div');
           row.className = "glass-card p-3 rounded-2xl flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer";
           row.onclick = () => playTrackFromList(track, tracks);
           row.innerHTML = `
-            <div class="w-11 h-11 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-400 shrink-0 overflow-hidden">
-              ${track.thumbnail ? `<img src="${track.thumbnail}" class="w-full h-full object-cover">` : `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>`}
+            <div class="relative w-11 h-11 rounded-xl overflow-hidden bg-white/5 shrink-0 flex items-center justify-center">
+              ${track.thumbnail ? `<img src="${track.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="art">` : ''}
+              <div class="w-full h-full bg-gradient-to-br from-indigo-600/30 to-purple-600/30 flex items-center justify-center text-indigo-300" style="${track.thumbnail ? 'display:none;' : ''}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+              </div>
             </div>
             <div class="min-w-0 flex-1">
               <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
               <div class="text-xs text-gray-400 line-clamp-1">${track.artist} • ${track.sizeFormatted || 'Offline'}</div>
             </div>
-            <div class="flex items-center gap-1.5">
-              <!-- Save to Playlist -->
-              <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(track)})" class="p-1.5 text-gray-400 hover:text-white" title="Save to Playlist">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-              </button>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-emerald-400 font-medium px-2 py-0.5 bg-emerald-500/10 rounded-md">On Phone</span>
               <!-- Delete from Device -->
-              <button onclick="event.stopPropagation(); deleteOfflineTrack('${track.id}', '${escapeQuotes(track.title)}')" class="p-1.5 text-red-400 hover:text-red-300" title="Delete from Device">
+              <button onclick="event.stopPropagation(); deleteOfflineTrack('${track.id}', '${escapeQuotes(track.title)}')" class="p-2 text-red-400 hover:text-red-300 active:scale-95 transition" title="Delete from Device">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
               </button>
-              <span class="text-xs text-emerald-400 font-medium px-2 py-0.5 bg-emerald-500/10 rounded-md">On Phone</span>
             </div>
           `;
           container.appendChild(row);
@@ -2265,21 +2372,22 @@
 
     function downloadCurrentTrack() {
       if (!currentTrack) return;
-      downloadSingleTrack(currentTrack.id, currentTrack.title, currentTrack.artist);
+      downloadSingleTrack(currentTrack.id, currentTrack.title, currentTrack.artist, currentTrack.thumbnail);
     }
 
-    async function downloadSingleTrack(id, title, artist) {
+    async function downloadSingleTrack(id, title, artist, thumbnail = '') {
       // 1. Check if already in device IndexedDB
       const existing = await SpotiDB.getTrack(id);
       if (existing) {
-        showToast(`✓ "${title}" is already saved on this phone!`);
+        updateDownloadProgressUI(id, 100, 'completed');
         return;
       }
 
-      showToast(`⬇️ Preparing "${title}" on server...`);
+      // Show initial circular progress ring immediately on UI
+      updateDownloadProgressUI(id, 5, 'downloading');
+
       try {
-        await fetch(`/api/download/${id}?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`, { method: 'POST' });
-        showToast(`⏳ Downloading "${title}" on server...`);
+        await fetch(`/api/download/${id}?title=${encodeURIComponent(title || '')}&artist=${encodeURIComponent(artist || '')}`, { method: 'POST' });
         
         // Poll status until download completes on iPhone 7 server
         let pollCount = 0;
@@ -2290,14 +2398,23 @@
             const data = await res.json();
             const info = data && data[id];
             if (info) {
-              if (info.status === 'ready_for_transfer' || info.status === 'completed') {
+              if (info.status === 'downloading' || info.status === 'extracting') {
+                const sPct = info.percent ? Math.round(info.percent * 0.85) : 15;
+                updateDownloadProgressUI(id, Math.max(10, sPct), 'downloading');
+              } else if (info.status === 'ready_for_transfer' || info.status === 'completed') {
                 clearInterval(poller);
-                showToast(`📲 Transferring "${title}" to your phone...`);
+                updateDownloadProgressUI(id, 90, 'downloading');
                 
-                // Fetch binary audio stream from server (iPhone 7 will auto-delete file immediately after delivery)
+                // Convert thumbnail image to base64 data URI in parallel with file transfer
+                const thumbPromise = convertImageUrlToBase64(thumbnail || (currentTrack && currentTrack.id === id ? currentTrack.thumbnail : ''));
+
+                // Fetch binary audio stream from server (iPhone 7 auto-deletes file immediately after delivery)
                 const fileRes = await fetch(`/api/download/file/${id}`);
                 if (!fileRes.ok) throw new Error("File transfer failed from server");
                 const blob = await fileRes.blob();
+
+                updateDownloadProgressUI(id, 98, 'downloading');
+                const finalThumb = await thumbPromise;
 
                 // Save to phone IndexedDB
                 const trackRecord = {
@@ -2305,14 +2422,18 @@
                   title: title || (currentTrack && currentTrack.id === id ? currentTrack.title : id),
                   artist: artist || (currentTrack && currentTrack.id === id ? currentTrack.artist : 'Unknown Artist'),
                   duration: (currentTrack && currentTrack.id === id ? currentTrack.duration : '--:--'),
-                  thumbnail: (currentTrack && currentTrack.id === id ? currentTrack.thumbnail : 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'),
+                  thumbnail: finalThumb || (currentTrack && currentTrack.id === id ? currentTrack.thumbnail : ''),
                   album: (currentTrack && currentTrack.id === id ? currentTrack.album : ''),
                   blob: blob,
                   sizeFormatted: (blob.size / (1024 * 1024)).toFixed(1) + ' MB'
                 };
                 await SpotiDB.saveTrack(trackRecord);
+                await refreshOfflineTrackIds();
 
-                showToast(`🎉 "${title}" saved to your phone! Server space cleared.`);
+                // Morph ring into completed green checkmark
+                updateDownloadProgressUI(id, 100, 'completed');
+
+                // Suppress success / cleanup toast bubbles as requested
                 if (typeof loadLibrary === 'function') loadLibrary();
                 if (typeof loadUserPlaylists === 'function') loadUserPlaylists();
                 if (activePlaylistId === 'user_pl_offline_downloads') {
@@ -2320,25 +2441,28 @@
                 }
               } else if (info.status === 'error') {
                 clearInterval(poller);
+                updateDownloadProgressUI(id, 0, 'error');
                 showToast(`⚠️ Download error: ${info.error || 'Failed'}`);
               }
             }
           } catch (e) {
             console.error("Poll/transfer error:", e);
           }
-          if (pollCount > 60) {
+          if (pollCount > 90) {
             clearInterval(poller);
-            showToast("Download timed out. Please try again.");
+            updateDownloadProgressUI(id, 0, 'error');
           }
-        }, 2000);
+        }, 1500);
       } catch (e) {
-        showToast(`Download error: ${e.message}`);
+        updateDownloadProgressUI(id, 0, 'error');
+        console.error("Download error:", e);
       }
     }
 
     async function deleteOfflineTrack(id, title) {
       if (confirm(`Remove "${title}" from this device's offline storage?`)) {
         await SpotiDB.deleteTrack(id);
+        await refreshOfflineTrackIds();
         showToast(`🗑️ Removed "${title}" from this device`);
         if (activePlaylistId === 'user_pl_offline_downloads') {
           openPlaylist('user_pl_offline_downloads', true);
