@@ -133,6 +133,28 @@
     .spoti-eq-paused .spoti-eq-bar-3 {
       animation-play-state: paused !important;
     }
+    /* Karaoke & Synced Lyrics Styling */
+    .lyric-line {
+      transition: color 0.25s ease, transform 0.25s ease, opacity 0.25s ease, font-size 0.25s ease;
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      padding: 6px 0;
+    }
+    .lyric-line-active {
+      color: #ffffff !important;
+      font-size: 1.125rem !important;
+      line-height: 1.5rem !important;
+      font-weight: 700 !important;
+      transform: scale(1.03);
+      text-shadow: 0 0 18px rgba(255, 255, 255, 0.45);
+      opacity: 1 !important;
+    }
+    .lyric-line-inactive {
+      color: rgba(255, 255, 255, 0.38);
+      font-size: 0.95rem;
+      font-weight: 500;
+    }
   </style>
 </head>
 <body class="w-full h-full flex flex-col antialiased">
@@ -465,10 +487,18 @@
       </div>
     </div>
 
-    <!-- Center Album Cover (Swipe Left/Right to Skip) -->
-    <div class="my-auto flex flex-col items-center py-6">
-      <div id="drawer-thumb-wrap" class="relative w-64 h-64 sm:w-80 sm:h-80 max-w-[85vw] max-h-[85vw] cursor-grab select-none">
+    <!-- Center View: Album Cover OR Karaoke Lyrics -->
+    <div id="drawer-center-view" class="my-auto relative flex flex-col items-center justify-center py-2 w-full">
+      <!-- Center Album Cover (Swipe Left/Right to Skip) -->
+      <div id="drawer-thumb-wrap" class="relative w-64 h-64 sm:w-80 sm:h-80 max-w-[85vw] max-h-[85vw] cursor-grab select-none transition-all duration-300">
         <img id="drawer-thumb" class="w-full h-full object-cover rounded-3xl shadow-2xl shadow-indigo-900/40 border border-white/10" src="" alt="Album Art">
+      </div>
+
+      <!-- Karaoke / Synced Lyrics View (Initially Hidden) -->
+      <div id="drawer-lyrics-wrap" class="hidden w-full max-w-sm sm:max-w-md h-64 sm:h-80 flex flex-col justify-center transition-all duration-300">
+        <div id="drawer-lyrics-scroll" class="w-full h-full overflow-y-auto px-4 space-y-2.5 text-center scroll-smooth py-12 select-none">
+          <div class="text-xs text-gray-400 py-12">Loading lyrics...</div>
+        </div>
       </div>
     </div>
 
@@ -509,6 +539,26 @@
         </button>
       </div>
 
+      <!-- Minimalist Quick Utilities: Lyrics Toggle | Sleep Timer | Playback Speed -->
+      <div class="flex items-center justify-center gap-2 pt-1 pb-1">
+        <!-- Lyrics Toggle Button -->
+        <button id="toggle-lyrics-btn" onclick="toggleLyricsView()" class="px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1.5 transition border border-white/5" title="Toggle Karaoke / Lyrics View">
+          <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
+          <span id="lyrics-btn-label">Lyrics</span>
+        </button>
+
+        <!-- Sleep Timer Button -->
+        <button id="sleep-timer-btn" onclick="openSleepTimerModal()" class="px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1.5 transition border border-white/5" title="Set Sleep Timer">
+          <svg class="w-3.5 h-3.5 fill-none stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span id="sleep-timer-label">Timer</span>
+        </button>
+
+        <!-- Playback Speed Button -->
+        <button id="playback-speed-btn" onclick="cyclePlaybackSpeed()" class="px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1 transition border border-white/5" title="Playback Speed">
+          <span id="speed-label">1.0x</span>
+        </button>
+      </div>
+
       <!-- Up Next / Radio Accordion -->
       <div class="pt-2">
         <div class="flex items-center justify-between text-xs text-gray-400 font-semibold uppercase tracking-wider mb-2">
@@ -516,6 +566,50 @@
           <span id="queue-count" class="text-indigo-400"></span>
         </div>
         <div id="drawer-queue-container" class="max-h-40 overflow-y-auto space-y-1.5 pr-1"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Sleep Timer Modal -->
+  <!-- ============================================================ -->
+  <div id="sleep-timer-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 hidden" onclick="closeSleepTimerModal()">
+    <div class="bg-[#181924] border border-white/10 rounded-t-3xl sm:rounded-3xl p-5 max-w-sm w-full space-y-3.5" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between pb-1 border-b border-white/5">
+        <div class="flex items-center gap-2">
+          <span class="text-base">🌙</span>
+          <h3 class="text-sm font-bold text-white">Sleep Timer</h3>
+        </div>
+        <button onclick="closeSleepTimerModal()" class="p-1.5 text-gray-400 hover:text-white rounded-full bg-white/5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="space-y-1.5 text-xs font-medium">
+        <button onclick="setSleepTimer(0)" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition">
+          <span>Turn Off</span>
+          <span id="timer-check-0" class="text-indigo-400 font-bold hidden">✓</span>
+        </button>
+        <button onclick="setSleepTimer(15)" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition">
+          <span>15 Minutes</span>
+          <span id="timer-check-15" class="text-indigo-400 font-bold hidden">✓</span>
+        </button>
+        <button onclick="setSleepTimer(30)" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition">
+          <span>30 Minutes</span>
+          <span id="timer-check-30" class="text-indigo-400 font-bold hidden">✓</span>
+        </button>
+        <button onclick="setSleepTimer(45)" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition">
+          <span>45 Minutes</span>
+          <span id="timer-check-45" class="text-indigo-400 font-bold hidden">✓</span>
+        </button>
+        <button onclick="setSleepTimer(60)" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition">
+          <span>1 Hour</span>
+          <span id="timer-check-60" class="text-indigo-400 font-bold hidden">✓</span>
+        </button>
+        <button onclick="setSleepTimer('track')" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition">
+          <span>End of Current Track</span>
+          <span id="timer-check-track" class="text-indigo-400 font-bold hidden">✓</span>
+        </button>
       </div>
     </div>
   </div>
@@ -707,6 +801,351 @@
     let authMode = 'login';
     let currentBlobUrl = null;
     let offlineTrackIdSet = new Set();
+
+    // -------------------------------------------------------------
+    // Milestone 3 State: Lyrics, Sleep Timer, Playback Speed
+    // -------------------------------------------------------------
+    let isLyricsViewOpen = false;
+    let activeLyricsTrackId = null;
+    let currentLyricsData = null; // { synced: boolean, lines: [] }
+    let currentActiveLyricIdx = -1;
+    let sleepTimerMode = 0; // 0: off, 15, 30, 45, 60, or 'track'
+    let sleepTimerRemainingSecs = 0;
+    let sleepTimerInterval = null;
+    let playbackSpeed = 1.0;
+    try {
+      const savedSpeed = parseFloat(localStorage.getItem('spoti_speed'));
+      if (!isNaN(savedSpeed) && savedSpeed > 0) playbackSpeed = savedSpeed;
+    } catch(e) {}
+
+    // -------------------------------------------------------------
+    // Karaoke / Synced Lyrics Engine (LRCLIB API)
+    // -------------------------------------------------------------
+    function toggleLyricsView() {
+      triggerHaptic('light');
+      isLyricsViewOpen = !isLyricsViewOpen;
+
+      const thumbWrap = document.getElementById('drawer-thumb-wrap');
+      const lyricsWrap = document.getElementById('drawer-lyrics-wrap');
+      const toggleBtn = document.getElementById('toggle-lyrics-btn');
+
+      if (isLyricsViewOpen) {
+        if (thumbWrap) thumbWrap.classList.add('hidden');
+        if (lyricsWrap) lyricsWrap.classList.remove('hidden');
+        if (toggleBtn) {
+          toggleBtn.className = "px-3.5 py-1.5 rounded-full bg-indigo-600 text-white font-semibold active:scale-95 text-xs flex items-center gap-1.5 transition shadow-md shadow-indigo-600/30";
+        }
+        if (currentTrack) {
+          loadLyricsForTrack(currentTrack);
+        }
+      } else {
+        if (thumbWrap) thumbWrap.classList.remove('hidden');
+        if (lyricsWrap) lyricsWrap.classList.add('hidden');
+        if (toggleBtn) {
+          toggleBtn.className = "px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1.5 transition border border-white/5";
+        }
+      }
+    }
+
+    async function loadLyricsForTrack(track) {
+      if (!track || !track.id) return;
+      if (activeLyricsTrackId === track.id && currentLyricsData) {
+        renderLyricsDOM(currentLyricsData);
+        return;
+      }
+
+      activeLyricsTrackId = track.id;
+      currentActiveLyricIdx = -1;
+      const scrollEl = document.getElementById('drawer-lyrics-scroll');
+      if (scrollEl) {
+        scrollEl.innerHTML = `
+          <div class="py-16 flex flex-col items-center justify-center gap-2">
+            <div class="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
+            <span class="text-xs text-gray-400 font-medium">Fetching lyrics...</span>
+          </div>
+        `;
+      }
+
+      // Check localStorage cache
+      try {
+        const cached = localStorage.getItem('spoti_lyrics_' + track.id);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          currentLyricsData = parsed;
+          renderLyricsDOM(parsed);
+          return;
+        }
+      } catch (e) {}
+
+      // Clean track title and artist for higher search match rate
+      const cleanTitle = (track.title || '')
+        .replace(/\(.*?\)|\[.*?\]|feat\..*|ft\..*|official.*|music video|lyric video/gi, '')
+        .trim();
+      const cleanArtist = (track.artist || '')
+        .replace(/feat\..*|ft\..*|,.*|&.*/gi, '')
+        .trim();
+
+      let lrclibData = null;
+
+      try {
+        // Attempt 1: Exact query via /api/get
+        const getUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(cleanArtist)}&track_name=${encodeURIComponent(cleanTitle)}`;
+        const res = await fetch(getUrl);
+        if (res.ok) {
+          lrclibData = await res.json();
+        } else {
+          // Attempt 2: Full search via /api/search
+          const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(cleanArtist + ' ' + cleanTitle)}`;
+          const searchRes = await fetch(searchUrl);
+          if (searchRes.ok) {
+            const list = await searchRes.json();
+            if (Array.isArray(list) && list.length > 0) {
+              lrclibData = list[0];
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('LRCLIB fetch error:', e);
+      }
+
+      if (!lrclibData || (!lrclibData.syncedLyrics && !lrclibData.plainLyrics)) {
+        currentLyricsData = { synced: false, lines: [], empty: true };
+        renderLyricsDOM(currentLyricsData);
+        return;
+      }
+
+      // Parse synced lyrics or plain lyrics
+      let result = null;
+      if (lrclibData.syncedLyrics) {
+        const rawLines = lrclibData.syncedLyrics.split('\n');
+        const lines = [];
+        const regex = /^\[(\d{2}):(\d{2})\.(\d{2,3})\]\s*(.*)$/;
+        for (const line of rawLines) {
+          const m = line.match(regex);
+          if (m) {
+            const min = parseInt(m[1], 10);
+            const sec = parseInt(m[2], 10);
+            const ms = parseInt(m[3].padEnd(3, '0').slice(0, 3), 10);
+            const time = min * 60 + sec + ms / 1000;
+            const text = m[4].trim();
+            if (text) lines.push({ time, text });
+          }
+        }
+        result = { synced: true, lines: lines };
+      } else {
+        const lines = lrclibData.plainLyrics
+          .split('\n')
+          .map(l => l.trim())
+          .filter(l => l.length > 0);
+        result = { synced: false, lines: lines };
+      }
+
+      currentLyricsData = result;
+      try {
+        localStorage.setItem('spoti_lyrics_' + track.id, JSON.stringify(result));
+      } catch (e) {}
+
+      if (activeLyricsTrackId === track.id) {
+        renderLyricsDOM(result);
+      }
+    }
+
+    function renderLyricsDOM(lyricsData) {
+      const scrollEl = document.getElementById('drawer-lyrics-scroll');
+      if (!scrollEl) return;
+
+      if (!lyricsData || lyricsData.empty || !lyricsData.lines || lyricsData.lines.length === 0) {
+        scrollEl.innerHTML = `
+          <div class="py-16 text-center text-gray-500 text-xs">
+            <span class="text-2xl block mb-2">🎙️</span>
+            No lyrics found for this track.
+          </div>
+        `;
+        return;
+      }
+
+      scrollEl.innerHTML = '';
+      if (lyricsData.synced) {
+        lyricsData.lines.forEach((line, idx) => {
+          const div = document.createElement('div');
+          div.id = `lyric-line-${idx}`;
+          div.className = "lyric-line lyric-line-inactive";
+          div.innerText = line.text;
+          div.onclick = () => seekToLyric(line.time);
+          scrollEl.appendChild(div);
+        });
+        updateLyricsTimeSync(audio.currentTime);
+      } else {
+        // Plain unsynced lyrics
+        lyricsData.lines.forEach(text => {
+          const div = document.createElement('div');
+          div.className = "py-1 text-sm font-medium text-gray-300";
+          div.innerText = text;
+          scrollEl.appendChild(div);
+        });
+      }
+    }
+
+    function seekToLyric(time) {
+      triggerHaptic('light');
+      audio.currentTime = time;
+      if (audio.paused) {
+        audio.play().catch(e => console.warn(e));
+      }
+    }
+
+    function updateLyricsTimeSync(currentTime) {
+      if (!isLyricsViewOpen || !currentLyricsData || !currentLyricsData.synced) return;
+      const lines = currentLyricsData.lines;
+      if (!lines || lines.length === 0) return;
+
+      let activeIdx = -1;
+      for (let i = 0; i < lines.length; i++) {
+        if (currentTime >= lines[i].time - 0.25) {
+          activeIdx = i;
+        } else {
+          break;
+        }
+      }
+
+      if (activeIdx !== currentActiveLyricIdx) {
+        if (currentActiveLyricIdx >= 0) {
+          const prevEl = document.getElementById(`lyric-line-${currentActiveLyricIdx}`);
+          if (prevEl) {
+            prevEl.className = "lyric-line lyric-line-inactive";
+          }
+        }
+        currentActiveLyricIdx = activeIdx;
+        if (currentActiveLyricIdx >= 0) {
+          const curEl = document.getElementById(`lyric-line-${currentActiveLyricIdx}`);
+          if (curEl) {
+            curEl.className = "lyric-line lyric-line-active";
+            curEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Sleep Timer System (Milestone 3)
+    // -------------------------------------------------------------
+    function openSleepTimerModal() {
+      triggerHaptic('light');
+      updateSleepTimerModalUI();
+      document.getElementById('sleep-timer-modal').classList.remove('hidden');
+    }
+
+    function closeSleepTimerModal() {
+      document.getElementById('sleep-timer-modal').classList.add('hidden');
+    }
+
+    function updateSleepTimerModalUI() {
+      ['0', '15', '30', '45', '60', 'track'].forEach(key => {
+        const el = document.getElementById(`timer-check-${key}`);
+        if (!el) return;
+        if (String(sleepTimerMode) === key) {
+          el.classList.remove('hidden');
+        } else {
+          el.classList.add('hidden');
+        }
+      });
+    }
+
+    function setSleepTimer(mode) {
+      triggerHaptic('medium');
+      clearInterval(sleepTimerInterval);
+      audio.volume = 1.0;
+      sleepTimerMode = mode;
+      updateSleepTimerModalUI();
+      closeSleepTimerModal();
+
+      const timerLabel = document.getElementById('sleep-timer-label');
+      const timerBtn = document.getElementById('sleep-timer-btn');
+
+      if (mode === 0) {
+        if (timerLabel) timerLabel.innerText = "Timer";
+        if (timerBtn) {
+          timerBtn.className = "px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1.5 transition border border-white/5";
+        }
+        showToast("Sleep timer turned off");
+        return;
+      }
+
+      if (timerBtn) {
+        timerBtn.className = "px-3.5 py-1.5 rounded-full bg-indigo-600/30 text-indigo-300 font-semibold border border-indigo-500/40 active:scale-95 text-xs flex items-center gap-1.5 transition";
+      }
+
+      if (mode === 'track') {
+        if (timerLabel) timerLabel.innerText = "⏱️ End of Song";
+        showToast("Sleep timer set for end of current song");
+        return;
+      }
+
+      // Minutes timer
+      sleepTimerRemainingSecs = mode * 60;
+      updateTimerPillDisplay();
+      showToast(`Sleep timer set for ${mode} minutes`);
+
+      sleepTimerInterval = setInterval(() => {
+        sleepTimerRemainingSecs--;
+        updateTimerPillDisplay();
+
+        // Smooth 15-second audio fade-out
+        if (sleepTimerRemainingSecs <= 15 && sleepTimerRemainingSecs > 0) {
+          audio.volume = Math.max(0, sleepTimerRemainingSecs / 15);
+        }
+
+        if (sleepTimerRemainingSecs <= 0) {
+          clearInterval(sleepTimerInterval);
+          audio.pause();
+          audio.volume = 1.0;
+          sleepTimerMode = 0;
+          if (timerLabel) timerLabel.innerText = "Timer";
+          if (timerBtn) {
+            timerBtn.className = "px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1.5 transition border border-white/5";
+          }
+          showToast("🌙 Sleep timer ended. Goodnight!");
+        }
+      }, 1000);
+    }
+
+    function updateTimerPillDisplay() {
+      const timerLabel = document.getElementById('sleep-timer-label');
+      if (!timerLabel) return;
+      const mm = Math.floor(sleepTimerRemainingSecs / 60);
+      const ss = sleepTimerRemainingSecs % 60;
+      timerLabel.innerText = `⏱️ ${mm}:${ss < 10 ? '0' : ''}${ss}`;
+    }
+
+    // -------------------------------------------------------------
+    // Playback Speed Controller (Milestone 3)
+    // -------------------------------------------------------------
+    const SPEED_OPTIONS = [1.0, 1.2, 1.5, 0.8];
+    function cyclePlaybackSpeed() {
+      triggerHaptic('light');
+      const idx = SPEED_OPTIONS.indexOf(playbackSpeed);
+      const nextIdx = (idx + 1) % SPEED_OPTIONS.length;
+      playbackSpeed = SPEED_OPTIONS[nextIdx];
+
+      audio.playbackRate = playbackSpeed;
+      updatePlaybackSpeedUI();
+      try {
+        localStorage.setItem('spoti_speed', String(playbackSpeed));
+      } catch (e) {}
+    }
+
+    function updatePlaybackSpeedUI() {
+      const label = document.getElementById('speed-label');
+      const btn = document.getElementById('playback-speed-btn');
+      if (label) label.innerText = `${playbackSpeed}x`;
+      if (btn) {
+        if (playbackSpeed !== 1.0) {
+          btn.className = "px-3.5 py-1.5 rounded-full bg-indigo-600/30 text-indigo-300 font-bold border border-indigo-500/40 active:scale-95 text-xs flex items-center gap-1 transition";
+        } else {
+          btn.className = "px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1 transition border border-white/5";
+        }
+      }
+    }
 
     // -------------------------------------------------------------
     // Tactile Haptic Engine (Milestone 2)
@@ -1726,6 +2165,7 @@
       setupMediaSession();
       initDrawerGestures();
       initCoverArtGestures();
+      updatePlaybackSpeedUI();
     });
 
     function enterOfflineMode() {
@@ -3529,6 +3969,16 @@
         dlBtn.classList.toggle('hidden', isDownloaded);
       }
 
+      // Apply current playback speed
+      if (audio) audio.playbackRate = playbackSpeed;
+
+      // If lyrics view is currently open, load lyrics for newly playing track
+      if (isLyricsViewOpen) {
+        loadLyricsForTrack(track);
+      } else {
+        activeLyricsTrackId = null;
+      }
+
       updateTrackRowEqualizers();
       updateMediaSession(track);
     }
@@ -3650,6 +4100,10 @@
           const miniBar = document.getElementById('mini-progress-bar');
           if (miniBar) miniBar.style.width = `${pct}%`;
 
+          if (isLyricsViewOpen) {
+            updateLyricsTimeSync(audio.currentTime);
+          }
+
           // 30 seconds before song ends, verify next track is preloaded
           if (audio.duration - audio.currentTime <= 30 && audio.currentTime > 10) {
             preloadNextTrack();
@@ -3658,6 +4112,19 @@
       });
 
       audio.addEventListener('ended', () => {
+        if (sleepTimerMode === 'track') {
+          audio.pause();
+          sleepTimerMode = 0;
+          const timerLabel = document.getElementById('sleep-timer-label');
+          if (timerLabel) timerLabel.innerText = "Timer";
+          const timerBtn = document.getElementById('sleep-timer-btn');
+          if (timerBtn) {
+            timerBtn.className = "px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1.5 transition border border-white/5";
+          }
+          showToast("🌙 End of song reached. Goodnight!");
+          return;
+        }
+
         if (repeatMode === 2) {
           audio.currentTime = 0;
           audio.play().catch(e => console.warn(e));
