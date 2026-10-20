@@ -1477,8 +1477,6 @@
 
       switchTab('library');
       switchLibrarySubtab('playlists');
-      loadUserPlaylists();
-      loadLibrary();
       showToast('⚡ Offline Mode: Playing songs downloaded to your phone');
     }
 
@@ -1563,7 +1561,8 @@
     // -------------------------------------------------------------
     // Library Subtabs & Custom Playlists
     // -------------------------------------------------------------
-    function switchLibrarySubtab(subtab) {
+    function switchLibrarySubtab(subtab, force = false) {
+      if (!force && librarySubtab === subtab) return;
       librarySubtab = subtab;
       const plBtn = document.getElementById('lib-subtab-playlists');
       const offBtn = document.getElementById('lib-subtab-offline');
@@ -1571,23 +1570,26 @@
       const offView = document.getElementById('library-offline-view');
 
       if (subtab === 'playlists') {
-        plBtn.className = "px-3.5 py-1.5 rounded-xl bg-white/10 text-white font-medium transition";
-        offBtn.className = "px-3.5 py-1.5 rounded-xl text-gray-400 hover:text-white transition";
-        plView.classList.remove('hidden');
-        offView.classList.add('hidden');
+        if (plBtn) plBtn.className = "px-3.5 py-1.5 rounded-xl bg-white/10 text-white font-medium transition";
+        if (offBtn) offBtn.className = "px-3.5 py-1.5 rounded-xl text-gray-400 hover:text-white transition";
+        if (plView) plView.classList.remove('hidden');
+        if (offView) offView.classList.add('hidden');
         loadUserPlaylists();
       } else {
-        offBtn.className = "px-3.5 py-1.5 rounded-xl bg-white/10 text-white font-medium transition";
-        plBtn.className = "px-3.5 py-1.5 rounded-xl text-gray-400 hover:text-white transition";
-        offView.classList.remove('hidden');
-        plView.classList.add('hidden');
+        if (offBtn) offBtn.className = "px-3.5 py-1.5 rounded-xl bg-white/10 text-white font-medium transition";
+        if (plBtn) plBtn.className = "px-3.5 py-1.5 rounded-xl text-gray-400 hover:text-white transition";
+        if (offView) offView.classList.remove('hidden');
+        if (plView) plView.classList.add('hidden');
         loadLibrary();
       }
     }
 
+    let playlistRenderSeq = 0;
     async function renderUserPlaylistsDOM(playlists) {
       const container = document.getElementById('user-playlists-grid');
       if (!container) return;
+
+      const currentSeq = ++playlistRenderSeq;
 
       let list = Array.isArray(playlists) ? [...playlists] : [];
 
@@ -1610,14 +1612,16 @@
       const plCountEl = document.getElementById('user-pl-count');
       if (plCountEl) plCountEl.innerText = customPlaylists.length;
 
-      container.innerHTML = '';
-
       const offlineTracks = await SpotiDB.getAllTracks();
+      if (currentSeq !== playlistRenderSeq) return;
+
       const offlineCount = offlineTracks.length;
       const offlineBadgeEl = document.getElementById('offline-songs-count');
       if (offlineBadgeEl) offlineBadgeEl.innerText = offlineCount;
 
-      userPlaylistsCache.forEach(pl => {
+      const fragment = document.createDocumentFragment();
+
+      list.forEach(pl => {
         let badgeText = `${pl.track_count || 0} ${pl.track_count === 1 ? 'song' : 'songs'}`;
         let descText = pl.description || 'Custom Playlist';
         let thumbMarkup = '';
@@ -1671,7 +1675,7 @@
           </div>
           <span class="text-xs text-gray-400 p-2">▶</span>
         `;
-        container.appendChild(card);
+        fragment.appendChild(card);
       });
 
       // If no custom playlists exist, display helpful empty state
@@ -1684,11 +1688,38 @@
             + Create Your First Playlist
           </button>
         `;
-        container.appendChild(emptyCard);
+        fragment.appendChild(emptyCard);
+      }
+
+      if (typeof container.replaceChildren === 'function') {
+        container.replaceChildren(fragment);
+      } else {
+        container.innerHTML = '';
+        container.appendChild(fragment);
       }
     }
 
+    let loadUserPlaylistsInflight = false;
+    let loadUserPlaylistsPendingNext = false;
+
     async function loadUserPlaylists() {
+      if (loadUserPlaylistsInflight) {
+        loadUserPlaylistsPendingNext = true;
+        return;
+      }
+      loadUserPlaylistsInflight = true;
+      try {
+        do {
+          loadUserPlaylistsPendingNext = false;
+          await _executeLoadUserPlaylists();
+        } while (loadUserPlaylistsPendingNext);
+      } finally {
+        loadUserPlaylistsInflight = false;
+        loadUserPlaylistsPendingNext = false;
+      }
+    }
+
+    async function _executeLoadUserPlaylists() {
       // 1. Instantly render from local cache so there is 0ms delay and no blank screen
       const cached = getLocalPlaylists();
       if (cached && cached.length > 0) {
@@ -2889,13 +2920,18 @@
     // -------------------------------------------------------------
     // Library (Device-Stored Offline Songs)
     // -------------------------------------------------------------
+    let libraryRenderSeq = 0;
     async function loadLibrary() {
       const container = document.getElementById('library-container');
+      if (!container) return;
+
+      const currentSeq = ++libraryRenderSeq;
       container.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Loading songs saved on device...</div>';
 
       try {
         const tracks = await SpotiDB.getAllTracks();
-        container.innerHTML = '';
+        if (currentSeq !== libraryRenderSeq) return;
+
         const countEl = document.getElementById('offline-songs-count');
         if (countEl) countEl.innerText = tracks.length;
 
@@ -2909,6 +2945,7 @@
           return;
         }
 
+        const fragment = document.createDocumentFragment();
         tracks.forEach(track => {
           const row = document.createElement('div');
           row.className = "glass-card p-3 rounded-2xl flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer";
@@ -2936,10 +2973,17 @@
               </button>
             </div>
           `;
-          container.appendChild(row);
+          fragment.appendChild(row);
         });
 
+        if (typeof container.replaceChildren === 'function') {
+          container.replaceChildren(fragment);
+        } else {
+          container.innerHTML = '';
+          container.appendChild(fragment);
+        }
       } catch (e) {
+        if (currentSeq !== libraryRenderSeq) return;
         container.innerHTML = '<div class="text-center py-10 text-red-400 text-sm">Failed to load offline songs on device.</div>';
       }
     }
