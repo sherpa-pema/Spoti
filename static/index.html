@@ -648,16 +648,24 @@
 
   <!-- Audio Element -->
   <audio id="audio-engine" preload="auto"></audio>
+  <audio id="spoti-preload-engine" preload="auto" muted style="display:none;"></audio>
 
   <!-- Application Logic -->
   <script>
     const audio = document.getElementById('audio-engine');
+    const preloadAudio = document.getElementById('spoti-preload-engine');
     let currentTrack = null;
     let queue = [];
     let queueIndex = -1;
     let isPlaying = false;
     let isSeeking = false;
     let isShuffle = false;
+    let shuffledQueueIndices = [];
+    let shufflePointer = -1;
+    let currentTrackLoadSeq = 0;
+    let preloadedTrackCache = {};
+    let preloadTimer = null;
+    let isPlaybackBuffering = false;
     let repeatMode = 0; // 0: none, 1: all, 2: one
     let currentSearchFilter = 'songs';
     let activeTab = 'home';
@@ -2991,11 +2999,137 @@
     // -------------------------------------------------------------
     // Audio Playback Engine & Queue
     // -------------------------------------------------------------
+    function stopCurrentAudioImmediately() {
+      try {
+        audio.pause();
+        audio.removeAttribute('src');
+        audio.load();
+      } catch (e) {}
+      isPlaying = false;
+      isPlaybackBuffering = false;
+      updatePlayPauseIcons(false);
+
+      if (currentBlobUrl) {
+        try { URL.revokeObjectURL(currentBlobUrl); } catch (e) {}
+        currentBlobUrl = null;
+      }
+
+      // Snappy UI reset: zero out scrubber and timer immediately
+      const slider = document.getElementById('seek-slider');
+      if (slider) slider.value = 0;
+      const curTime = document.getElementById('current-time');
+      if (curTime) curTime.innerText = '0:00';
+    }
+
+    function initShuffledQueue() {
+      if (!queue || queue.length === 0) return;
+      shuffledQueueIndices = queue.map((_, i) => i);
+      for (let i = shuffledQueueIndices.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffledQueueIndices[i], shuffledQueueIndices[j]] = [shuffledQueueIndices[j], shuffledQueueIndices[i]];
+      }
+      const curPos = shuffledQueueIndices.indexOf(queueIndex);
+      if (curPos !== -1) {
+        [shuffledQueueIndices[0], shuffledQueueIndices[curPos]] = [shuffledQueueIndices[curPos], shuffledQueueIndices[0]];
+        shufflePointer = 0;
+      } else {
+        shufflePointer = 0;
+      }
+    }
+
+    function peekNextTrack() {
+      if (!queue || queue.length === 0) return null;
+      if (queue.length === 1) return repeatMode !== 0 ? queue[0] : null;
+
+      if (repeatMode === 2) {
+        return queue[queueIndex] || queue[0];
+      }
+
+      if (isShuffle) {
+        if (shuffledQueueIndices.length !== queue.length || shufflePointer < 0 || shufflePointer >= shuffledQueueIndices.length) {
+          initShuffledQueue();
+        }
+        const nextPtr = (shufflePointer + 1) % shuffledQueueIndices.length;
+        return queue[shuffledQueueIndices[nextPtr]];
+      } else {
+        const nextIdx = (queueIndex + 1) % queue.length;
+        if (nextIdx === 0 && repeatMode === 0) return null;
+        return queue[nextIdx];
+      }
+    }
+
+    async function schedulePreloadNextTrack(delayMs = 3500) {
+      if (preloadTimer) {
+        clearTimeout(preloadTimer);
+        preloadTimer = null;
+      }
+      if (!navigator.onLine) return;
+
+      preloadTimer = setTimeout(() => {
+        preloadNextTrack();
+      }, delayMs);
+    }
+
+    async function preloadNextTrack() {
+      if (!navigator.onLine) return;
+      const next = peekNextTrack();
+      if (!next || !next.id) return;
+
+      // 1. If already saved in phone IndexedDB, 0ms local playback is guaranteed
+      try {
+        const offline = await SpotiDB.getTrack(next.id);
+        if (offline && offline.blob) return;
+      } catch (e) {}
+
+      // 2. Check if already preloaded and fresh (< 2 hours)
+      const cached = preloadedTrackCache[next.id];
+      if (cached && cached.url && (Date.now() - cached.timestamp < 2 * 3600 * 1000)) {
+        return;
+      }
+
+      try {
+        // Resolve YouTube video ID if needed
+        let targetId = next.id;
+        if (typeof ensureTrackHasYtId === 'function') {
+          targetId = await ensureTrackHasYtId(next);
+        }
+        if (!targetId) return;
+
+        // Fetch stream URL from server (triggers yt-dlp warm-up in server _STREAM_CACHE)
+        const res = await fetch(`/api/stream/${targetId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || !data.url) return;
+
+        preloadedTrackCache[next.id] = {
+          url: data.url,
+          ytId: targetId,
+          timestamp: Date.now()
+        };
+        if (targetId !== next.id) {
+          preloadedTrackCache[targetId] = preloadedTrackCache[next.id];
+        }
+
+        // Pre-warm browser audio cache
+        const pEngine = document.getElementById('spoti-preload-engine');
+        if (pEngine) {
+          pEngine.src = data.url;
+          pEngine.load();
+        }
+      } catch (err) {
+        console.warn("Background preload silent notice:", err);
+      }
+    }
+
     async function playTrackFromList(track, trackList = []) {
       currentTrack = track;
       queue = [...trackList];
       queueIndex = queue.findIndex(t => t.id === track.id);
       if (queueIndex === -1) queueIndex = 0;
+
+      if (isShuffle) {
+        initShuffledQueue();
+      }
 
       await loadAndPlayTrack(track);
       if (navigator.onLine) {
@@ -3004,49 +3138,90 @@
     }
 
     async function loadAndPlayTrack(track) {
+      const thisSeq = ++currentTrackLoadSeq;
+
+      // 1. Immediately cut off old audio - zero trailing sound, snappy response
+      stopCurrentAudioImmediately();
+
+      // 2. Immediately update UI (title, artist, cover art, MediaSession)
       updateUIForTrack(track);
 
+      // 3. Show buffering spinner in play buttons
+      isPlaybackBuffering = true;
+      updatePlayPauseIcons(false, true);
+
       try {
-        // 1. Check if track is saved in phone IndexedDB
+        // Check phone IndexedDB for local audio
         let blob = track.blob;
         if (!blob) {
-          const offline = await SpotiDB.getTrack(track.id);
-          if (offline && offline.blob) {
-            blob = offline.blob;
-          }
+          try {
+            const offline = await SpotiDB.getTrack(track.id);
+            if (offline && offline.blob) {
+              blob = offline.blob;
+            }
+          } catch (e) {}
         }
 
+        if (thisSeq !== currentTrackLoadSeq) return;
+
         if (blob) {
-          // Play directly from phone memory with zero network latency
-          if (currentBlobUrl) {
-            try { URL.revokeObjectURL(currentBlobUrl); } catch (err) {}
-            currentBlobUrl = null;
-          }
+          // Instant playback directly from phone memory (0ms)
           currentBlobUrl = URL.createObjectURL(blob);
           audio.src = currentBlobUrl;
         } else if (track.is_local) {
           audio.src = track.url;
         } else {
-          // Stream online from server
+          // Online stream
           if (!navigator.onLine) {
             showToast('⚠️ Streaming unavailable while offline. Select a downloaded song.');
+            isPlaybackBuffering = false;
+            updatePlayPauseIcons(false);
             return;
           }
-          const res = await fetch(`/api/stream/${track.id}`);
-          const data = await res.json();
-          audio.src = data.url;
+
+          // Check if preloaded in memory
+          const cached = preloadedTrackCache[track.id] || (track.yt_id ? preloadedTrackCache[track.yt_id] : null);
+          let streamUrl = null;
+
+          if (cached && cached.url && (Date.now() - cached.timestamp < 2 * 3600 * 1000)) {
+            streamUrl = cached.url;
+          } else {
+            let targetId = track.id;
+            if (typeof ensureTrackHasYtId === 'function') {
+              targetId = await ensureTrackHasYtId(track);
+            }
+            if (thisSeq !== currentTrackLoadSeq) return;
+
+            const res = await fetch(`/api/stream/${targetId}`);
+            if (thisSeq !== currentTrackLoadSeq) return;
+            const data = await res.json();
+            streamUrl = data.url;
+          }
+
+          if (thisSeq !== currentTrackLoadSeq) return;
+          audio.src = streamUrl;
         }
 
         audio.play().then(() => {
+          if (thisSeq !== currentTrackLoadSeq) return;
           isPlaying = true;
+          isPlaybackBuffering = false;
           updatePlayPauseIcons(true);
+          schedulePreloadNextTrack(3500);
         }).catch(err => {
+          if (thisSeq !== currentTrackLoadSeq) return;
           console.warn("Playback error:", err);
+          isPlaying = false;
+          isPlaybackBuffering = false;
           updatePlayPauseIcons(false);
         });
 
       } catch (e) {
-        console.error("Playback error:", e);
+        if (thisSeq !== currentTrackLoadSeq) return;
+        console.error("Playback load error:", e);
+        isPlaying = false;
+        isPlaybackBuffering = false;
+        updatePlayPauseIcons(false);
       }
     }
 
@@ -3074,18 +3249,34 @@
     function togglePlayPause() {
       if (!audio.src) return;
       if (audio.paused) {
-        audio.play();
-        isPlaying = true;
+        audio.play().then(() => {
+          isPlaying = true;
+          isPlaybackBuffering = false;
+          updatePlayPauseIcons(true);
+        }).catch(err => console.warn(err));
       } else {
         audio.pause();
         isPlaying = false;
+        isPlaybackBuffering = false;
+        updatePlayPauseIcons(false);
       }
-      updatePlayPauseIcons(!audio.paused);
     }
 
-    function updatePlayPauseIcons(playing) {
+    function updatePlayPauseIcons(playing, buffering = false) {
       const miniIcon = document.getElementById('mini-play-icon');
       const drawerIcon = document.getElementById('drawer-play-icon');
+      if (!miniIcon || !drawerIcon) return;
+
+      if (buffering) {
+        const spinnerSvg = `
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none"></circle>
+          <path class="opacity-75 animate-spin" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+        `;
+        miniIcon.innerHTML = spinnerSvg;
+        drawerIcon.innerHTML = spinnerSvg;
+        return;
+      }
+
       if (playing) {
         miniIcon.innerHTML = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
         drawerIcon.innerHTML = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
@@ -3097,11 +3288,19 @@
 
     function playNext() {
       if (queue.length === 0) return;
+      const next = peekNextTrack();
+      if (!next) {
+        stopCurrentAudioImmediately();
+        return;
+      }
+
       if (isShuffle) {
-        queueIndex = Math.floor(Math.random() * queue.length);
+        shufflePointer = (shufflePointer + 1) % shuffledQueueIndices.length;
+        queueIndex = shuffledQueueIndices[shufflePointer];
       } else {
         queueIndex = (queueIndex + 1) % queue.length;
       }
+
       loadAndPlayTrack(queue[queueIndex]);
     }
 
@@ -3111,13 +3310,24 @@
         return;
       }
       if (queue.length === 0) return;
-      queueIndex = (queueIndex - 1 + queue.length) % queue.length;
+
+      if (isShuffle) {
+        shufflePointer = (shufflePointer - 1 + shuffledQueueIndices.length) % shuffledQueueIndices.length;
+        queueIndex = shuffledQueueIndices[shufflePointer];
+      } else {
+        queueIndex = (queueIndex - 1 + queue.length) % queue.length;
+      }
+
       loadAndPlayTrack(queue[queueIndex]);
     }
 
     function toggleShuffle() {
       isShuffle = !isShuffle;
       document.getElementById('shuffle-btn').classList.toggle('text-indigo-400', isShuffle);
+      if (isShuffle) {
+        initShuffledQueue();
+      }
+      schedulePreloadNextTrack(1000);
     }
 
     function toggleRepeat() {
@@ -3130,29 +3340,55 @@
       } else {
         btn.className = "text-purple-400 font-bold p-2";
       }
+      schedulePreloadNextTrack(1000);
     }
 
     function setupAudioEvents() {
       audio.addEventListener('timeupdate', () => {
         if (!isSeeking && audio.duration) {
           const pct = (audio.currentTime / audio.duration) * 100;
-          document.getElementById('seek-slider').value = pct;
-          document.getElementById('current-time').innerText = formatTime(audio.currentTime);
-          document.getElementById('total-duration').innerText = formatTime(audio.duration);
+          const slider = document.getElementById('seek-slider');
+          if (slider) slider.value = pct;
+          const curTime = document.getElementById('current-time');
+          if (curTime) curTime.innerText = formatTime(audio.currentTime);
+          const totDur = document.getElementById('total-duration');
+          if (totDur) totDur.innerText = formatTime(audio.duration);
+
+          // 30 seconds before song ends, verify next track is preloaded
+          if (audio.duration - audio.currentTime <= 30 && audio.currentTime > 10) {
+            preloadNextTrack();
+          }
         }
       });
 
       audio.addEventListener('ended', () => {
         if (repeatMode === 2) {
           audio.currentTime = 0;
-          audio.play();
+          audio.play().catch(e => console.warn(e));
         } else {
           playNext();
         }
       });
 
-      audio.addEventListener('play', () => updatePlayPauseIcons(true));
-      audio.addEventListener('pause', () => updatePlayPauseIcons(false));
+      audio.addEventListener('playing', () => {
+        isPlaying = true;
+        isPlaybackBuffering = false;
+        updatePlayPauseIcons(true);
+      });
+
+      audio.addEventListener('pause', () => {
+        if (!isPlaybackBuffering) {
+          isPlaying = false;
+          updatePlayPauseIcons(false);
+        }
+      });
+
+      audio.addEventListener('waiting', () => {
+        if (isPlaying) {
+          isPlaybackBuffering = true;
+          updatePlayPauseIcons(false, true);
+        }
+      });
     }
 
     function onSeekInput() {
