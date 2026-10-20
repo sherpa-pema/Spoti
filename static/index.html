@@ -484,6 +484,9 @@
         <button id="drawer-download-btn" onclick="promptDownloadTrack(currentTrack)" class="p-2 text-gray-400 hover:text-white rounded-full bg-white/5" title="Download / Add to Playlist">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
         </button>
+        <button onclick="if(currentTrack) openTrackContextMenu(currentTrack)" class="p-2 text-gray-400 hover:text-white rounded-full bg-white/5" title="More options">
+          <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+        </button>
       </div>
     </div>
 
@@ -562,8 +565,11 @@
       <!-- Up Next / Radio Accordion -->
       <div class="pt-2">
         <div class="flex items-center justify-between text-xs text-gray-400 font-semibold uppercase tracking-wider mb-2">
-          <span>Up Next & Radio Recommendations</span>
-          <span id="queue-count" class="text-indigo-400"></span>
+          <span>Up Next & Radio</span>
+          <div class="flex items-center gap-2">
+            <span id="queue-count" class="text-indigo-400"></span>
+            <button onclick="clearUpcomingQueue()" class="text-[11px] text-red-400/80 hover:text-red-300 capitalize font-medium transition hover:underline">clear</button>
+          </div>
         </div>
         <div id="drawer-queue-container" class="max-h-40 overflow-y-auto space-y-1.5 pr-1"></div>
       </div>
@@ -609,6 +615,73 @@
         <button onclick="setSleepTimer('track')" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition">
           <span>End of Current Track</span>
           <span id="timer-check-track" class="text-indigo-400 font-bold hidden">✓</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Track Context Menu Modal (Play Next, Add to Queue, Share) -->
+  <!-- ============================================================ -->
+  <div id="track-context-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 hidden" onclick="closeTrackContextMenu()">
+    <div class="bg-[#181924] border border-white/10 rounded-t-3xl sm:rounded-3xl p-5 max-w-sm w-full space-y-3.5 transition-transform" onclick="event.stopPropagation()">
+      <!-- Track Header -->
+      <div class="flex items-center gap-3 pb-3 border-b border-white/5">
+        <img id="ctx-track-thumb" src="" class="w-12 h-12 rounded-xl object-cover bg-white/5 shrink-0 shadow" alt="thumb">
+        <div class="min-w-0 flex-1">
+          <div id="ctx-track-title" class="text-sm font-bold text-white line-clamp-1">Track Title</div>
+          <div id="ctx-track-artist" class="text-xs text-gray-400 line-clamp-1 mt-0.5">Artist Name</div>
+        </div>
+        <button onclick="closeTrackContextMenu()" class="p-1.5 text-gray-400 hover:text-white rounded-full bg-white/5 shrink-0">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Action Items -->
+      <div class="space-y-1 text-xs font-medium">
+        <!-- Play Next -->
+        <button onclick="executeCtxPlayNext()" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] text-left text-gray-200 flex items-center gap-3 transition">
+          <span class="text-base">⏭️</span>
+          <div class="flex-1">
+            <div class="font-semibold text-white">Play Next</div>
+            <div class="text-[11px] text-gray-400">Insert directly after currently playing track</div>
+          </div>
+        </button>
+
+        <!-- Add to Queue -->
+        <button onclick="executeCtxAddToQueue()" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] text-left text-gray-200 flex items-center gap-3 transition">
+          <span class="text-base">➕</span>
+          <div class="flex-1">
+            <div class="font-semibold text-white">Add to Queue</div>
+            <div class="text-[11px] text-gray-400">Append to the end of the upcoming queue</div>
+          </div>
+        </button>
+
+        <!-- Download & Playlist -->
+        <button onclick="executeCtxDownloadPlaylist()" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] text-left text-gray-200 flex items-center gap-3 transition">
+          <span class="text-base">⬇️</span>
+          <div class="flex-1">
+            <div class="font-semibold text-white">Save to Playlist / Download</div>
+            <div class="text-[11px] text-gray-400">Store on device or add to custom playlists</div>
+          </div>
+        </button>
+
+        <!-- Like Toggle -->
+        <button id="ctx-like-btn" onclick="executeCtxToggleLike()" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] text-left text-gray-200 flex items-center gap-3 transition">
+          <span id="ctx-like-icon" class="text-base">❤️</span>
+          <div class="flex-1">
+            <div id="ctx-like-label" class="font-semibold text-white">Like Song</div>
+            <div class="text-[11px] text-gray-400">Save to your private Liked Songs collection</div>
+          </div>
+        </button>
+
+        <!-- Share -->
+        <button onclick="executeCtxShare()" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] text-left text-gray-200 flex items-center gap-3 transition">
+          <span class="text-base">🔗</span>
+          <div class="flex-1">
+            <div class="font-semibold text-white">Share Song</div>
+            <div class="text-[11px] text-gray-400">Copy song link or share via native apps</div>
+          </div>
         </button>
       </div>
     </div>
@@ -817,6 +890,161 @@
       const savedSpeed = parseFloat(localStorage.getItem('spoti_speed'));
       if (!isNaN(savedSpeed) && savedSpeed > 0) playbackSpeed = savedSpeed;
     } catch(e) {}
+
+    // -------------------------------------------------------------
+    // Context Actions Menu & Queue 2.0 Engine (Milestone 4)
+    // -------------------------------------------------------------
+    let trackPendingContext = null;
+
+    function openTrackContextMenu(track) {
+      if (!track) return;
+      triggerHaptic('light');
+      trackPendingContext = track;
+
+      const modal = document.getElementById('track-context-modal');
+      const thumbEl = document.getElementById('ctx-track-thumb');
+      const titleEl = document.getElementById('ctx-track-title');
+      const artistEl = document.getElementById('ctx-track-artist');
+      const likeIcon = document.getElementById('ctx-like-icon');
+      const likeLabel = document.getElementById('ctx-like-label');
+
+      if (thumbEl) thumbEl.src = track.thumbnail || '/static/icon.png';
+      if (titleEl) titleEl.innerText = track.title || 'Unknown Title';
+      if (artistEl) artistEl.innerText = track.artist || 'Unknown Artist';
+
+      const isLiked = userLikedTrackIds.has(track.id);
+      if (likeIcon && likeLabel) {
+        likeIcon.innerText = isLiked ? '💔' : '❤️';
+        likeLabel.innerText = isLiked ? 'Remove from Liked Songs' : 'Save to Liked Songs';
+      }
+
+      if (modal) modal.classList.remove('hidden');
+    }
+
+    function closeTrackContextMenu() {
+      const modal = document.getElementById('track-context-modal');
+      if (modal) modal.classList.add('hidden');
+      trackPendingContext = null;
+    }
+
+    function executeCtxPlayNext() {
+      if (!trackPendingContext) return;
+      const t = trackPendingContext;
+      closeTrackContextMenu();
+      playTrackNext(t);
+    }
+
+    function executeCtxAddToQueue() {
+      if (!trackPendingContext) return;
+      const t = trackPendingContext;
+      closeTrackContextMenu();
+      addTrackToQueue(t);
+    }
+
+    function executeCtxDownloadPlaylist() {
+      if (!trackPendingContext) return;
+      const t = trackPendingContext;
+      closeTrackContextMenu();
+      promptDownloadTrack(t);
+    }
+
+    function executeCtxToggleLike() {
+      if (!trackPendingContext) return;
+      const t = trackPendingContext;
+      closeTrackContextMenu();
+      toggleLikeTrack(t);
+    }
+
+    function executeCtxShare() {
+      if (!trackPendingContext) return;
+      const t = trackPendingContext;
+      closeTrackContextMenu();
+      shareTrack(t);
+    }
+
+    function playTrackNext(track) {
+      triggerHaptic('medium');
+      if (!currentTrack || queue.length === 0) {
+        playTrackFromList(track, [track]);
+        showToast(`Playing "${track.title}" now`);
+        return;
+      }
+
+      // Remove existing duplicate if already upcoming in queue
+      queue = queue.filter((t, idx) => idx <= queueIndex || t.id !== track.id);
+      // Insert right after current song
+      queue.splice(queueIndex + 1, 0, track);
+      if (isShuffle) initShuffledQueue();
+      schedulePreloadNextTrack(800);
+      renderDrawerQueue();
+      showToast(`Playing next: "${track.title}"`);
+    }
+
+    function addTrackToQueue(track) {
+      triggerHaptic('medium');
+      if (!currentTrack || queue.length === 0) {
+        playTrackFromList(track, [track]);
+        showToast(`Playing "${track.title}" now`);
+        return;
+      }
+
+      queue.push(track);
+      if (isShuffle) initShuffledQueue();
+      renderDrawerQueue();
+      showToast(`Added to queue: "${track.title}"`);
+    }
+
+    function shareTrack(track) {
+      triggerHaptic('light');
+      if (!track) return;
+      const shareData = {
+        title: track.title,
+        text: `Listen to "${track.title}" by ${track.artist} on Spoti`,
+        url: window.location.origin
+      };
+      if (navigator.share) {
+        navigator.share(shareData).catch(() => {});
+      } else {
+        try {
+          navigator.clipboard.writeText(`${shareData.text} — ${shareData.url}`);
+          showToast("Link copied to clipboard!");
+        } catch (e) {
+          showToast(`"${track.title}" by ${track.artist}`);
+        }
+      }
+    }
+
+    function removeFromQueue(realIdx, event) {
+      if (event) event.stopPropagation();
+      triggerHaptic('light');
+      if (realIdx > queueIndex && realIdx < queue.length) {
+        queue.splice(realIdx, 1);
+        if (isShuffle) initShuffledQueue();
+        schedulePreloadNextTrack(800);
+        renderDrawerQueue();
+        showToast("Removed from queue");
+      }
+    }
+
+    function clearUpcomingQueue() {
+      triggerHaptic('light');
+      if (queueIndex >= 0 && queueIndex < queue.length) {
+        queue = queue.slice(0, queueIndex + 1);
+      } else {
+        queue = [];
+      }
+      if (isShuffle) initShuffledQueue();
+      renderDrawerQueue();
+      showToast("Upcoming queue cleared");
+    }
+
+    function renderContextMenuBtnHtml(track) {
+      return `
+        <button onclick="event.stopPropagation(); openTrackContextMenu(${escapeTrackObj(track)})" class="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-white/10 active:scale-95 transition shrink-0" title="More options">
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+        </button>
+      `;
+    }
 
     // -------------------------------------------------------------
     // Karaoke / Synced Lyrics Engine (LRCLIB API)
@@ -2959,7 +3187,10 @@
             <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
             <span class="inline-block mt-1 text-[9px] font-medium px-1.5 py-0.2 rounded bg-white/5 text-indigo-300">${track.source || 'Trending'}</span>
           </div>
-          ${renderDownloadBtnHtml(track)}
+          <div class="flex items-center gap-1">
+            ${renderDownloadBtnHtml(track)}
+            ${renderContextMenuBtnHtml(track)}
+          </div>
         `;
         trendingContainer.appendChild(card);
       });
@@ -3011,7 +3242,10 @@
             <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
             ${track.weeks_on_chart ? `<span class="text-[10px] text-amber-300/80 mt-0.5 block font-mono">${track.weeks_on_chart} wks on chart</span>` : ''}
           </div>
-          ${renderDownloadBtnHtml(track)}
+          <div class="flex items-center gap-1">
+            ${renderDownloadBtnHtml(track)}
+            ${renderContextMenuBtnHtml(track)}
+          </div>
         `;
         billboardContainer.appendChild(card);
       });
@@ -3105,7 +3339,10 @@
                 <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
                 ${track.release_date ? `<span class="text-[10px] text-purple-300/80 mt-0.5 block font-mono">${track.release_date}</span>` : ''}
               </div>
-              ${renderDownloadBtnHtml(track)}
+              <div class="flex items-center gap-1">
+                ${renderDownloadBtnHtml(track)}
+                ${renderContextMenuBtnHtml(track)}
+              </div>
             `;
             newReleasesContainer.appendChild(card);
           });
@@ -3171,7 +3408,10 @@
             <div class="text-[11px] text-gray-400 line-clamp-1">${t.artist}</div>
           </div>
           <span class="text-[11px] text-gray-400 font-mono px-1">${t.duration || ''}</span>
-          ${renderDownloadBtnHtml(t)}
+          <div class="flex items-center gap-1">
+            ${renderDownloadBtnHtml(t)}
+            ${renderContextMenuBtnHtml(t)}
+          </div>
         `;
         listEl.appendChild(row);
       });
@@ -3361,13 +3601,15 @@
                 <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${item.title}</span>${renderEqIndicatorHtml(item.id, item.title)}</div>
                 <div class="text-xs text-gray-400 line-clamp-1">${item.artist} • ${item.duration}</div>
               </div>
-              <div class="flex items-center gap-1.5">
+              <div class="flex items-center gap-1">
                 <!-- Like -->
                 <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(item)}, event)" class="p-2 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
                   <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
                 </button>
                 <!-- Unified Download / Add to Playlist / Progress Ring -->
                 ${renderDownloadBtnHtml(item)}
+                <!-- More Context Options -->
+                ${renderContextMenuBtnHtml(item)}
               </div>
             `;
           }
@@ -3442,6 +3684,7 @@
               <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(t)})" class="p-2 text-indigo-400 hover:text-indigo-300 active:scale-95 transition" title="Add to Playlist">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
               </button>
+              ${renderContextMenuBtnHtml(t)}
               <!-- Delete from Device -->
               <button onclick="event.stopPropagation(); deleteOfflineTrack('${t.id}', '${escapeQuotes(t.title)}')" class="p-2 text-red-400 hover:text-red-300 active:scale-95 transition" title="Delete from Device">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
@@ -3542,8 +3785,9 @@
             <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${t.title}</span>${renderEqIndicatorHtml(t.id, t.title)}</div>
             <div class="text-xs text-gray-400 line-clamp-1">${t.artist || 'Unknown'}</div>
           </div>
-          <div class="flex items-center gap-1.5">
+          <div class="flex items-center gap-1">
             ${actionButtonsHtml}
+            ${renderContextMenuBtnHtml(t)}
           </div>
         `;
         trackList.appendChild(row);
@@ -3666,12 +3910,13 @@
               <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${track.title}</span>${renderEqIndicatorHtml(track.id, track.title)}</div>
               <div class="text-xs text-gray-400 line-clamp-1">${track.artist} • ${track.sizeFormatted || 'Offline'}</div>
             </div>
-            <div class="flex items-center gap-1.5">
+            <div class="flex items-center gap-1">
               <span class="text-xs text-emerald-400 font-medium px-2 py-0.5 bg-emerald-500/10 rounded-md">On Phone</span>
               <!-- Add to Playlist -->
               <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(track)})" class="p-2 text-indigo-400 hover:text-indigo-300 active:scale-95 transition" title="Add to Playlist">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
               </button>
+              ${renderContextMenuBtnHtml(track)}
               <!-- Delete from Device -->
               <button onclick="event.stopPropagation(); deleteOfflineTrack('${track.id}', '${escapeQuotes(track.title)}')" class="p-2 text-red-400 hover:text-red-300 active:scale-95 transition" title="Delete from Device">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
@@ -4197,26 +4442,42 @@
     function renderDrawerQueue() {
       const container = document.getElementById('drawer-queue-container');
       const countEl = document.getElementById('queue-count');
+      if (!container || !countEl) return;
       const upcoming = queue.slice(queueIndex + 1);
       countEl.innerText = `${upcoming.length} up next`;
       container.innerHTML = '';
 
-      upcoming.slice(0, 15).forEach((t) => {
+      if (upcoming.length === 0) {
+        container.innerHTML = `
+          <div class="py-6 text-center text-gray-500 text-xs">
+            No upcoming songs. Use <b>Play Next</b> or <b>Add to Queue</b> to queue up more!
+          </div>
+        `;
+        return;
+      }
+
+      upcoming.slice(0, 25).forEach((t, i) => {
+        const realIdx = queueIndex + 1 + i;
         const row = document.createElement('div');
-        row.className = "flex items-center justify-between p-2 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer text-xs";
+        row.className = "flex items-center justify-between p-2 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer text-xs group";
         row.onclick = () => {
-          queueIndex = queue.findIndex(item => item.id === t.id);
+          queueIndex = realIdx;
           loadAndPlayTrack(t);
         };
         row.innerHTML = `
           <div class="flex items-center gap-2.5 min-w-0 flex-1">
-            <img src="${t.thumbnail}" class="w-8 h-8 rounded-lg object-cover" alt="art">
+            <img src="${t.thumbnail}" class="w-8 h-8 rounded-lg object-cover bg-black/40 shrink-0" alt="art">
             <div class="min-w-0 flex-1">
               <div class="font-medium text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${t.title}</span>${renderEqIndicatorHtml(t.id, t.title)}</div>
               <div class="text-[11px] text-gray-400 line-clamp-1">${t.artist}</div>
             </div>
           </div>
-          <span class="text-gray-500 font-mono text-[10px] pl-2">${t.duration || ''}</span>
+          <div class="flex items-center gap-2 pl-2">
+            <span class="text-gray-500 font-mono text-[10px]">${t.duration || ''}</span>
+            <button onclick="removeFromQueue(${realIdx}, event)" class="p-1 text-gray-500 hover:text-red-400 rounded-lg hover:bg-white/10 transition" title="Remove from queue">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
         `;
         container.appendChild(row);
       });
