@@ -113,7 +113,25 @@
       border: 1px solid rgba(255, 255, 255, 0.06);
     }
     #now-playing-drawer {
-      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+      background: radial-gradient(circle at 50% 25%, var(--ambient-glow, rgba(99, 102, 241, 0.28)) 0%, rgba(13, 14, 20, 0.96) 72%), #0d0e14;
+      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), background 0.8s ease-in-out;
+      touch-action: pan-y;
+    }
+    #drawer-thumb-wrap {
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+      touch-action: pan-y;
+    }
+    /* 3-Bar Audio Equalizer Animations */
+    @keyframes eq1 { 0%, 100% { height: 3px; } 50% { height: 12px; } }
+    @keyframes eq2 { 0%, 100% { height: 11px; } 50% { height: 4px; } }
+    @keyframes eq3 { 0%, 100% { height: 6px; } 50% { height: 13px; } }
+    .spoti-eq-bar-1 { animation: eq1 0.75s ease-in-out infinite; }
+    .spoti-eq-bar-2 { animation: eq2 0.6s ease-in-out infinite; }
+    .spoti-eq-bar-3 { animation: eq3 0.85s ease-in-out infinite; }
+    .spoti-eq-paused .spoti-eq-bar-1,
+    .spoti-eq-paused .spoti-eq-bar-2,
+    .spoti-eq-paused .spoti-eq-bar-3 {
+      animation-play-state: paused !important;
     }
   </style>
 </head>
@@ -377,7 +395,9 @@
   <!-- 3. Sticky Bottom Mini-Player Bar -->
   <!-- ============================================================ -->
   <div id="mini-player" class="app-mini-player fixed left-0 right-0 px-3 z-30 hidden" onclick="openNowPlayingDrawer()">
-    <div class="glass-card bg-[#161822]/95 border border-white/10 rounded-2xl p-2.5 flex items-center justify-between shadow-2xl shadow-black/80">
+    <div class="glass-card relative overflow-hidden bg-[#161822]/95 border border-white/10 rounded-2xl p-2.5 flex items-center justify-between shadow-2xl shadow-black/80 transition-all duration-300">
+      <!-- Hairline Micro-Progress Bar -->
+      <div id="mini-progress-bar" class="absolute top-0 left-0 h-[2.5px] bg-indigo-500 rounded-full transition-all duration-200 pointer-events-none w-0"></div>
       <div class="flex items-center gap-3 min-w-0 flex-1">
         <img id="mini-thumb" src="" class="w-11 h-11 rounded-lg object-cover shadow" alt="art">
         <div class="min-w-0 flex-1">
@@ -424,6 +444,9 @@
   <!-- 5. Full-Screen Now Playing Drawer / Sheet -->
   <!-- ============================================================ -->
   <div id="now-playing-drawer" class="app-drawer fixed inset-0 bg-[#0d0e14] z-50 flex flex-col justify-between px-6 transform translate-y-full overflow-y-auto">
+    <!-- Tactile Sheet Grab Handle -->
+    <div id="drawer-grab-handle" onclick="closeNowPlayingDrawer()" class="w-12 h-1.5 bg-white/25 hover:bg-white/45 active:bg-white/60 rounded-full mx-auto -mt-2 mb-2 cursor-grab shrink-0 transition" title="Swipe or tap down to close"></div>
+
     <div class="flex items-center justify-between shrink-0">
       <button onclick="closeNowPlayingDrawer()" class="p-2 text-gray-400 hover:text-white rounded-full bg-white/5">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
@@ -442,9 +465,9 @@
       </div>
     </div>
 
-    <!-- Center Album Cover -->
+    <!-- Center Album Cover (Swipe Left/Right to Skip) -->
     <div class="my-auto flex flex-col items-center py-6">
-      <div class="relative w-64 h-64 sm:w-80 sm:h-80 max-w-[85vw] max-h-[85vw]">
+      <div id="drawer-thumb-wrap" class="relative w-64 h-64 sm:w-80 sm:h-80 max-w-[85vw] max-h-[85vw] cursor-grab select-none">
         <img id="drawer-thumb" class="w-full h-full object-cover rounded-3xl shadow-2xl shadow-indigo-900/40 border border-white/10" src="" alt="Album Art">
       </div>
     </div>
@@ -684,6 +707,237 @@
     let authMode = 'login';
     let currentBlobUrl = null;
     let offlineTrackIdSet = new Set();
+
+    // -------------------------------------------------------------
+    // Tactile Haptic Engine (Milestone 2)
+    // -------------------------------------------------------------
+    function triggerHaptic(type = 'light') {
+      if (!('vibrate' in navigator)) return;
+      try {
+        if (type === 'light') navigator.vibrate(8);
+        else if (type === 'medium') navigator.vibrate(18);
+        else if (type === 'success') navigator.vibrate([10, 30, 15]);
+      } catch (e) {}
+    }
+
+    // -------------------------------------------------------------
+    // In-Memory Dominant Color & Ambient Aura Sampler (Milestone 1)
+    // -------------------------------------------------------------
+    function extractDominantColor(imgSrc, callback) {
+      if (!imgSrc) return callback('rgb(99, 102, 241)', 'rgba(99, 102, 241, 0.32)');
+      const img = new Image();
+      img.crossOrigin = "Anonymous";
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          canvas.width = 16;
+          canvas.height = 16;
+          ctx.drawImage(img, 0, 0, 16, 16);
+          const data = ctx.getImageData(0, 0, 16, 16).data;
+          let r = 0, g = 0, b = 0, count = 0;
+          for (let i = 0; i < data.length; i += 4) {
+            const br = (data[i] + data[i+1] + data[i+2]) / 3;
+            // Skip pure blacks or washed-out pure whites
+            if (br > 28 && br < 232) {
+              r += data[i]; g += data[i+1]; b += data[i+2]; count++;
+            }
+          }
+          if (count > 0) {
+            r = Math.round(r / count);
+            g = Math.round(g / count);
+            b = Math.round(b / count);
+          } else {
+            r = 99; g = 102; b = 241;
+          }
+          callback(`rgb(${r}, ${g}, ${b})`, `rgba(${r}, ${g}, ${b}, 0.36)`);
+        } catch (e) {
+          // Fallback if canvas is tainted by external cross-origin restrictions
+          callback('rgb(99, 102, 241)', 'rgba(99, 102, 241, 0.32)');
+        }
+      };
+      img.onerror = () => callback('rgb(99, 102, 241)', 'rgba(99, 102, 241, 0.32)');
+      img.src = imgSrc;
+    }
+
+    // -------------------------------------------------------------
+    // Animated 3-Bar Audio Equalizer Indicator (Milestone 1)
+    // -------------------------------------------------------------
+    function renderEqIndicatorHtml(trackId, trackTitle = '') {
+      const isThis = currentTrack && (
+        currentTrack.id === trackId ||
+        currentTrack._origId === trackId ||
+        (currentTrack.originalId && currentTrack.originalId === trackId) ||
+        (currentTrack.title && trackTitle && currentTrack.title.toLowerCase() === trackTitle.toLowerCase())
+      );
+      const showClass = isThis ? 'inline-flex' : 'hidden';
+      const pausedClass = !isPlaying ? 'spoti-eq-paused' : '';
+      return `
+        <span class="spoti-eq-indicator ${showClass} ${pausedClass} items-end gap-[2px] h-3 w-3 shrink-0 text-indigo-400" data-track-id="${escapeHtml(trackId)}" data-track-title="${escapeHtml(trackTitle)}">
+          <span class="bg-indigo-400 w-[2.5px] rounded-full spoti-eq-bar-1"></span>
+          <span class="bg-indigo-400 w-[2.5px] rounded-full spoti-eq-bar-2"></span>
+          <span class="bg-indigo-400 w-[2.5px] rounded-full spoti-eq-bar-3"></span>
+        </span>
+      `;
+    }
+
+    function updateTrackRowEqualizers() {
+      document.querySelectorAll('.spoti-eq-indicator').forEach(el => {
+        const trackId = el.getAttribute('data-track-id');
+        const trackTitle = el.getAttribute('data-track-title');
+        const isThis = currentTrack && (
+          currentTrack.id === trackId ||
+          currentTrack._origId === trackId ||
+          (currentTrack.originalId && currentTrack.originalId === trackId) ||
+          (currentTrack.title && trackTitle && currentTrack.title.toLowerCase() === trackTitle.toLowerCase())
+        );
+        if (isThis) {
+          el.classList.remove('hidden');
+          el.classList.add('inline-flex');
+          el.classList.toggle('spoti-eq-paused', !isPlaying);
+        } else {
+          el.classList.add('hidden');
+          el.classList.remove('inline-flex');
+        }
+      });
+    }
+
+    // -------------------------------------------------------------
+    // Natural Fluid Gestures: Pull-to-Dismiss & Cover Swipe (Milestone 2)
+    // -------------------------------------------------------------
+    function initDrawerGestures() {
+      const drawer = document.getElementById('now-playing-drawer');
+      if (!drawer) return;
+
+      let startY = 0;
+      let currentY = 0;
+      let isDraggingDrawer = false;
+      let startTime = 0;
+
+      drawer.addEventListener('touchstart', (e) => {
+        if (drawer.scrollTop <= 0) {
+          startY = e.touches[0].clientY;
+          currentY = startY;
+          startTime = Date.now();
+          isDraggingDrawer = true;
+        } else {
+          isDraggingDrawer = false;
+        }
+      }, { passive: true });
+
+      drawer.addEventListener('touchmove', (e) => {
+        if (!isDraggingDrawer) return;
+        currentY = e.touches[0].clientY;
+        const deltaY = currentY - startY;
+
+        if (deltaY > 0) {
+          drawer.style.transition = 'none';
+          drawer.style.transform = `translateY(${deltaY}px)`;
+        } else {
+          drawer.style.transform = '';
+        }
+      }, { passive: true });
+
+      drawer.addEventListener('touchend', (e) => {
+        if (!isDraggingDrawer) return;
+        isDraggingDrawer = false;
+        drawer.style.transition = 'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1)';
+
+        const deltaY = currentY - startY;
+        const duration = Date.now() - startTime;
+        const velocity = deltaY / Math.max(1, duration);
+
+        if (deltaY > 120 || (velocity > 0.5 && deltaY > 35)) {
+          triggerHaptic('light');
+          closeNowPlayingDrawer();
+        } else {
+          drawer.style.transform = 'translateY(0)';
+        }
+      }, { passive: true });
+    }
+
+    function initCoverArtGestures() {
+      const thumbWrap = document.getElementById('drawer-thumb-wrap');
+      if (!thumbWrap) return;
+
+      let startX = 0;
+      let startY = 0;
+      let currentX = 0;
+      let currentY = 0;
+      let isSwiping = false;
+
+      thumbWrap.addEventListener('touchstart', (e) => {
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        currentX = startX;
+        currentY = startY;
+        isSwiping = true;
+        thumbWrap.style.transition = 'none';
+      }, { passive: true });
+
+      thumbWrap.addEventListener('touchmove', (e) => {
+        if (!isSwiping) return;
+        currentX = e.touches[0].clientX;
+        currentY = e.touches[0].clientY;
+        const deltaX = currentX - startX;
+        const deltaY = currentY - startY;
+
+        if (Math.abs(deltaX) > Math.abs(deltaY)) {
+          const drag = deltaX * 0.45;
+          const opacity = Math.max(0.35, 1 - Math.abs(deltaX) / 300);
+          thumbWrap.style.transform = `translateX(${drag}px) scale(0.98)`;
+          thumbWrap.style.opacity = `${opacity}`;
+        }
+      }, { passive: true });
+
+      thumbWrap.addEventListener('touchend', (e) => {
+        if (!isSwiping) return;
+        isSwiping = false;
+        thumbWrap.style.transition = 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease';
+
+        const deltaX = currentX - startX;
+        const deltaY = currentY - startY;
+
+        if (Math.abs(deltaX) > Math.abs(deltaY)) {
+          if (deltaX < -60) {
+            // Swipe left -> Next track
+            triggerHaptic('light');
+            thumbWrap.style.transform = 'translateX(-80px)';
+            thumbWrap.style.opacity = '0';
+            setTimeout(() => {
+              playNext();
+              thumbWrap.style.transition = 'none';
+              thumbWrap.style.transform = 'translateX(80px)';
+              setTimeout(() => {
+                thumbWrap.style.transition = 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease';
+                thumbWrap.style.transform = 'translateX(0)';
+                thumbWrap.style.opacity = '1';
+              }, 30);
+            }, 150);
+            return;
+          } else if (deltaX > 60) {
+            // Swipe right -> Previous track
+            triggerHaptic('light');
+            thumbWrap.style.transform = 'translateX(80px)';
+            thumbWrap.style.opacity = '0';
+            setTimeout(() => {
+              playPrev();
+              thumbWrap.style.transition = 'none';
+              thumbWrap.style.transform = 'translateX(-80px)';
+              setTimeout(() => {
+                thumbWrap.style.transition = 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease';
+                thumbWrap.style.transform = 'translateX(0)';
+                thumbWrap.style.opacity = '1';
+              }, 30);
+            }, 150);
+            return;
+          }
+        }
+
+        thumbWrap.style.transform = 'translateX(0) scale(1)';
+        thumbWrap.style.opacity = '1';
+      }, { passive: true });
+    }
 
     // -------------------------------------------------------------
     // Client-Side Offline Storage Engine (IndexedDB)
@@ -1366,6 +1620,7 @@
 
     async function toggleLikeTrack(track, event) {
       if (event) event.stopPropagation();
+      triggerHaptic('success');
       if (!currentUser) {
         showToast("Please log in to like songs");
         openAuthModal('login');
@@ -1469,6 +1724,8 @@
 
       setupAudioEvents();
       setupMediaSession();
+      initDrawerGestures();
+      initCoverArtGestures();
     });
 
     function enterOfflineMode() {
@@ -2258,7 +2515,7 @@
             </div>
           </div>
           <div class="min-w-0 flex-1">
-            <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
+            <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${track.title}</span>${renderEqIndicatorHtml(track.id, track.title)}</div>
             <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
             <span class="inline-block mt-1 text-[9px] font-medium px-1.5 py-0.2 rounded bg-white/5 text-indigo-300">${track.source || 'Trending'}</span>
           </div>
@@ -2310,7 +2567,7 @@
             </div>
           </div>
           <div class="min-w-0 flex-1">
-            <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
+            <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${track.title}</span>${renderEqIndicatorHtml(track.id, track.title)}</div>
             <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
             ${track.weeks_on_chart ? `<span class="text-[10px] text-amber-300/80 mt-0.5 block font-mono">${track.weeks_on_chart} wks on chart</span>` : ''}
           </div>
@@ -2404,7 +2661,7 @@
                 </div>
               </div>
               <div class="min-w-0 flex-1">
-                <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
+                <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${track.title}</span>${renderEqIndicatorHtml(track.id, track.title)}</div>
                 <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
                 ${track.release_date ? `<span class="text-[10px] text-purple-300/80 mt-0.5 block font-mono">${track.release_date}</span>` : ''}
               </div>
@@ -2470,7 +2727,7 @@
             </div>
           </div>
           <div class="min-w-0 flex-1">
-            <div class="text-xs font-semibold text-white line-clamp-1">${t.title}</div>
+            <div class="text-xs font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${t.title}</span>${renderEqIndicatorHtml(t.id, t.title)}</div>
             <div class="text-[11px] text-gray-400 line-clamp-1">${t.artist}</div>
           </div>
           <span class="text-[11px] text-gray-400 font-mono px-1">${t.duration || ''}</span>
@@ -2661,7 +2918,7 @@
                 </div>
               </div>
               <div class="min-w-0 flex-1">
-                <div class="text-sm font-semibold text-white line-clamp-1">${item.title}</div>
+                <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${item.title}</span>${renderEqIndicatorHtml(item.id, item.title)}</div>
                 <div class="text-xs text-gray-400 line-clamp-1">${item.artist} • ${item.duration}</div>
               </div>
               <div class="flex items-center gap-1.5">
@@ -2737,7 +2994,7 @@
               </div>
             </div>
             <div class="min-w-0 flex-1">
-              <div class="text-sm font-semibold text-white line-clamp-1">${t.title}</div>
+              <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${t.title}</span>${renderEqIndicatorHtml(t.id, t.title)}</div>
               <div class="text-xs text-gray-400 line-clamp-1">${t.artist} • ${t.sizeFormatted || 'Offline'}</div>
             </div>
             <div class="flex items-center gap-1">
@@ -2842,7 +3099,7 @@
             </div>
           </div>
           <div class="min-w-0 flex-1">
-            <div class="text-sm font-semibold text-white line-clamp-1">${t.title}</div>
+            <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${t.title}</span>${renderEqIndicatorHtml(t.id, t.title)}</div>
             <div class="text-xs text-gray-400 line-clamp-1">${t.artist || 'Unknown'}</div>
           </div>
           <div class="flex items-center gap-1.5">
@@ -2966,7 +3223,7 @@
               </div>
             </div>
             <div class="min-w-0 flex-1">
-              <div class="text-sm font-semibold text-white line-clamp-1">${track.title}</div>
+              <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${track.title}</span>${renderEqIndicatorHtml(track.id, track.title)}</div>
               <div class="text-xs text-gray-400 line-clamp-1">${track.artist} • ${track.sizeFormatted || 'Offline'}</div>
             </div>
             <div class="flex items-center gap-1.5">
@@ -3019,6 +3276,9 @@
       if (slider) slider.value = 0;
       const curTime = document.getElementById('current-time');
       if (curTime) curTime.innerText = '0:00';
+      const miniBar = document.getElementById('mini-progress-bar');
+      if (miniBar) miniBar.style.width = '0%';
+      updateTrackRowEqualizers();
     }
 
     function initShuffledQueue() {
@@ -3235,6 +3495,32 @@
       document.getElementById('drawer-artist').innerText = track.artist;
       document.getElementById('drawer-thumb').src = track.thumbnail;
 
+      // Extract dominant color and cast ambient aura (Milestone 1)
+      extractDominantColor(track.thumbnail, (rgbColor, rgbaColor) => {
+        const drawer = document.getElementById('now-playing-drawer');
+        if (drawer) {
+          drawer.style.setProperty('--ambient-glow', rgbaColor);
+          drawer.style.background = `radial-gradient(circle at 50% 25%, ${rgbaColor} 0%, rgba(13, 14, 20, 0.96) 72%), #0d0e14`;
+        }
+        const drawerThumb = document.getElementById('drawer-thumb');
+        if (drawerThumb) {
+          drawerThumb.style.boxShadow = `0 24px 48px -12px ${rgbaColor}`;
+        }
+        const miniCard = document.querySelector('#mini-player .glass-card');
+        if (miniCard) {
+          miniCard.style.borderColor = rgbaColor;
+          miniCard.style.boxShadow = `0 10px 25px -5px ${rgbaColor}`;
+        }
+        const miniProg = document.getElementById('mini-progress-bar');
+        if (miniProg) {
+          miniProg.style.backgroundColor = rgbColor;
+        }
+      });
+
+      // Reset mini-player progress bar for new track
+      const miniBar = document.getElementById('mini-progress-bar');
+      if (miniBar) miniBar.style.width = '0%';
+
       // Dynamic download button visibility in now playing drawer:
       // Hide if already downloaded to phone, show if streaming so user can listen first then download
       const isDownloaded = offlineTrackIdSet.has(track.id) || !!track.blob || !!track.is_local;
@@ -3243,22 +3529,26 @@
         dlBtn.classList.toggle('hidden', isDownloaded);
       }
 
+      updateTrackRowEqualizers();
       updateMediaSession(track);
     }
 
     function togglePlayPause() {
       if (!audio.src) return;
+      triggerHaptic('medium');
       if (audio.paused) {
         audio.play().then(() => {
           isPlaying = true;
           isPlaybackBuffering = false;
           updatePlayPauseIcons(true);
+          updateTrackRowEqualizers();
         }).catch(err => console.warn(err));
       } else {
         audio.pause();
         isPlaying = false;
         isPlaybackBuffering = false;
         updatePlayPauseIcons(false);
+        updateTrackRowEqualizers();
       }
     }
 
@@ -3284,10 +3574,12 @@
         miniIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
         drawerIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
       }
+      updateTrackRowEqualizers();
     }
 
     function playNext() {
       if (queue.length === 0) return;
+      triggerHaptic('light');
       const next = peekNextTrack();
       if (!next) {
         stopCurrentAudioImmediately();
@@ -3305,6 +3597,7 @@
     }
 
     function playPrev() {
+      triggerHaptic('light');
       if (audio.currentTime > 3) {
         audio.currentTime = 0;
         return;
@@ -3354,6 +3647,9 @@
           const totDur = document.getElementById('total-duration');
           if (totDur) totDur.innerText = formatTime(audio.duration);
 
+          const miniBar = document.getElementById('mini-progress-bar');
+          if (miniBar) miniBar.style.width = `${pct}%`;
+
           // 30 seconds before song ends, verify next track is preloaded
           if (audio.duration - audio.currentTime <= 30 && audio.currentTime > 10) {
             preloadNextTrack();
@@ -3400,6 +3696,7 @@
     }
 
     function onSeekChange() {
+      triggerHaptic('light');
       const pct = document.getElementById('seek-slider').value;
       if (audio.duration) {
         audio.currentTime = (pct / 100) * audio.duration;
@@ -3448,7 +3745,7 @@
           <div class="flex items-center gap-2.5 min-w-0 flex-1">
             <img src="${t.thumbnail}" class="w-8 h-8 rounded-lg object-cover" alt="art">
             <div class="min-w-0 flex-1">
-              <div class="font-medium text-white line-clamp-1">${t.title}</div>
+              <div class="font-medium text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${t.title}</span>${renderEqIndicatorHtml(t.id, t.title)}</div>
               <div class="text-[11px] text-gray-400 line-clamp-1">${t.artist}</div>
             </div>
           </div>
@@ -3653,12 +3950,20 @@
     }
 
     function openNowPlayingDrawer() {
-      document.getElementById('now-playing-drawer').classList.remove('translate-y-full');
+      const drawer = document.getElementById('now-playing-drawer');
+      if (drawer) {
+        drawer.style.transform = '';
+        drawer.classList.remove('translate-y-full');
+      }
       renderDrawerQueue();
     }
 
     function closeNowPlayingDrawer() {
-      document.getElementById('now-playing-drawer').classList.add('translate-y-full');
+      const drawer = document.getElementById('now-playing-drawer');
+      if (drawer) {
+        drawer.style.transform = '';
+        drawer.classList.add('translate-y-full');
+      }
     }
 
     function openQrModal() {
