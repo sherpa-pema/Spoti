@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#0c0d12">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -38,7 +38,10 @@
       color: #f3f4f6;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       -webkit-tap-highlight-color: transparent;
+    }
+    .app-header, .app-nav, .app-mini-player, button, input[type="range"] {
       user-select: none;
+      -webkit-user-select: none;
     }
     .app-header {
       padding-top: max(calc(env(safe-area-inset-top, 0px) + 6px), 12px);
@@ -861,20 +864,44 @@
         .replace(/'/g, "&#039;");
     }
 
+    function sanitizeImageUrl(url) {
+      if (!url || typeof url !== 'string') return '';
+      const trimmed = url.trim();
+      if (trimmed.startsWith('https://') || trimmed.startsWith('http://') || trimmed.startsWith('data:image/')) {
+        return escapeHtml(trimmed);
+      }
+      return '';
+    }
+
+    // In-memory track registry preventing inline HTML injection
+    const trackRegistry = new Map();
+
+    function registerTrack(t) {
+      if (!t || !t.id) return null;
+      const tid = String(t.id);
+      trackRegistry.set(tid, t);
+      return tid;
+    }
+
+    function getTrackFromRegistry(tid) {
+      return trackRegistry.get(String(tid));
+    }
+
     function escapeQuotes(str) {
       if (!str) return '';
-      return String(str).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+      return escapeHtml(String(str));
     }
 
     function escapeTrackObj(t) {
       if (!t) return '{}';
+      registerTrack(t);
       const copy = {
-        id: t.id,
-        title: t.title || '',
-        artist: t.artist || '',
-        duration: t.duration || '',
-        thumbnail: t.thumbnail || '',
-        album: t.album || ''
+        id: String(t.id || ''),
+        title: String(t.title || ''),
+        artist: String(t.artist || ''),
+        duration: String(t.duration || ''),
+        thumbnail: sanitizeImageUrl(t.thumbnail),
+        album: String(t.album || '')
       };
       return JSON.stringify(copy).replace(/"/g, '&quot;');
     }
@@ -1852,16 +1879,26 @@
     async function migrateOfflineThumbnails() {
       if (!navigator.onLine) return;
       try {
-        const tracks = await SpotiDB.getAllTracks();
-        for (const t of tracks) {
-          if (t.thumbnail && t.thumbnail.startsWith('http')) {
-            const b64 = await convertImageUrlToBase64(t.thumbnail);
-            if (b64 && b64.startsWith('data:')) {
-              t.thumbnail = b64;
-              await SpotiDB.saveTrack(t);
+        const db = await SpotiDB.open();
+        const tx = db.transaction('tracks', 'readwrite');
+        const store = tx.objectStore('tracks');
+        const req = store.openCursor();
+        req.onsuccess = async (e) => {
+          const cursor = e.target.result;
+          if (cursor) {
+            const track = cursor.value;
+            if (track && track.thumbnail && track.thumbnail.startsWith('http')) {
+              try {
+                const b64 = await convertImageUrlToBase64(track.thumbnail);
+                if (b64 && b64.startsWith('data:')) {
+                  track.thumbnail = b64;
+                  cursor.update(track);
+                }
+              } catch (err) {}
             }
+            cursor.continue();
           }
-        }
+        };
       } catch (e) {
         console.warn("Thumbnail migration error:", e);
       }
@@ -2579,6 +2616,10 @@
 
     window.addEventListener('DOMContentLoaded', async () => {
       window.scrollTo(0, 0);
+
+      if (navigator.storage && navigator.storage.persist) {
+        navigator.storage.persist().catch(() => {});
+      }
 
       await refreshOfflineTrackIds();
 

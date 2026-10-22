@@ -1,10 +1,12 @@
 import os
+import re
 import sys
 import base64
 import json
 import time
 import threading
 from typing import Optional, Dict, Any
+from cachetools import TTLCache
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_DIR not in sys.path:
@@ -13,12 +15,19 @@ if PROJECT_DIR not in sys.path:
 import database
 from pocketbase.client import ClientResponseError
 
-# Fast in-memory token cache: token -> (payload_dict, cached_at)
-_TOKEN_CACHE: Dict[str, tuple] = {}
+
+class AuthServiceUnavailableError(Exception):
+    """Raised when PocketBase is unreachable or fails with 5xx during auth."""
+    pass
+
+
+# Fast in-memory token cache: token -> payload_dict (bounded TTL)
+_TOKEN_CACHE: TTLCache = TTLCache(maxsize=300, ttl=1800)
 _CACHE_LOCK = threading.Lock()
 
-# User lookup cache: user_id -> username
-_USERNAME_CACHE: Dict[str, str] = {}
+# User lookup cache: user_id -> username (bounded TTL)
+_USERNAME_CACHE: TTLCache = TTLCache(maxsize=300, ttl=86400)
+
 
 
 def _get_username_for_id(user_id: str) -> str:
@@ -40,7 +49,9 @@ def _get_username_for_id(user_id: str) -> str:
 def verify_token(token: str) -> Optional[Dict[str, Any]]:
     """
     Cryptographically verifies a PocketBase user JWT token.
-    Returns dict with 'uid', 'usr', and 'exp' if valid, None otherwise.
+    Returns dict with 'uid', 'usr', and 'exp' if valid.
+    Raises AuthServiceUnavailableError if PocketBase cannot be reached.
+    Returns None if token is invalid or expired.
     """
     if not token or "." not in token:
         return None
@@ -48,11 +59,14 @@ def verify_token(token: str) -> Optional[Dict[str, Any]]:
     now = time.time()
     with _CACHE_LOCK:
         if token in _TOKEN_CACHE:
-            cached_payload, cached_at = _TOKEN_CACHE[token]
-            if cached_payload.get("exp", 0) > now:
-                return cached_payload
+            payload = _TOKEN_CACHE[token]
+            if payload.get("exp", 0) > now:
+                return payload
             else:
-                del _TOKEN_CACHE[token]
+                try:
+                    del _TOKEN_CACHE[token]
+                except KeyError:
+                    pass
 
     try:
         user_pb = database.get_user_pb(token)
@@ -70,35 +84,49 @@ def verify_token(token: str) -> Optional[Dict[str, Any]]:
         }
 
         with _CACHE_LOCK:
-            # Enforce max cache size on iPhone 7
-            if len(_TOKEN_CACHE) > 300:
-                _TOKEN_CACHE.clear()
-            if len(_USERNAME_CACHE) > 300:
-                _USERNAME_CACHE.clear()
-            _TOKEN_CACHE[token] = (payload, now)
+            _TOKEN_CACHE[token] = payload
             _USERNAME_CACHE[user_id] = username
 
         return payload
-    except Exception:
+    except ClientResponseError as e:
+        status = getattr(e, "status", 0)
+        if status in (400, 401, 403, 404):
+            return None
+        # PocketBase server error (5xx)
+        raise AuthServiceUnavailableError(f"PocketBase auth failed with status {status}") from e
+    except (ConnectionError, TimeoutError, OSError) as e:
+        # Network or connection dropped to PocketBase
+        raise AuthServiceUnavailableError(f"PocketBase connection unreachable: {e}") from e
+    except Exception as e:
+        # If string contains connection refused or reset
+        err_msg = str(e).lower()
+        if "connect" in err_msg or "refused" in err_msg or "timeout" in err_msg or "502" in err_msg or "503" in err_msg:
+            raise AuthServiceUnavailableError(f"PocketBase connection unreachable: {e}") from e
         return None
 
 
 def register_user(username: str, password: str) -> Dict[str, Any]:
     """Registers a new user in PocketBase and returns their auth token."""
     username = username.strip()
-    if not username or len(username) < 2:
-        raise ValueError("Username must be at least 2 characters long.")
-    if not password or len(password) < 4:
-        raise ValueError("Password must be at least 4 characters long.")
+    if not username or len(username) < 2 or len(username) > 32:
+        raise ValueError("Username must be between 2 and 32 characters long.")
+    if not re.match(r"^[A-Za-z0-9_.\- ]+$", username):
+        raise ValueError("Username contains invalid characters. Use letters, numbers, spaces, dots, hyphens, or underscores.")
+    if not password or len(password) < 8:
+        raise ValueError("Password must be at least 8 characters long.")
+    if len(password) > 128:
+        raise ValueError("Password must not exceed 128 characters.")
 
     email = f"{username.lower().replace(' ', '_')}@spoti.local"
 
     admin_pb = database.get_admin_pb()
 
-    # Check if username or email already taken in PocketBase
+    # Check if username or email already taken in PocketBase with escaped parameters
+    esc_email = database.pb_escape(email)
+    esc_username = database.pb_escape(username)
     try:
         existing = admin_pb.collection("users").get_list(
-            1, 1, query_params={"filter": f'email = "{email}" || name = "{username}"'}
+            1, 1, query_params={"filter": f'email = "{esc_email}" || name = "{esc_username}"'}
         )
         if existing.total_items > 0:
             raise ValueError(f"Username '{username}' is already taken.")
@@ -161,7 +189,8 @@ def authenticate_user(username: str, password: str) -> Dict[str, Any]:
         # Check by name in case email differs
         try:
             admin_pb = database.get_admin_pb()
-            found = admin_pb.collection("users").get_list(1, 1, query_params={"filter": f'name = "{username}"'})
+            esc_username = database.pb_escape(username)
+            found = admin_pb.collection("users").get_list(1, 1, query_params={"filter": f'name = "{esc_username}"'})
             if found.total_items > 0:
                 user_email = found.items[0].email
                 auth_data = user_pb.collection("users").auth_with_password(user_email, password)
@@ -174,6 +203,8 @@ def authenticate_user(username: str, password: str) -> Dict[str, Any]:
                 }
         except Exception:
             pass
+
+        raise ValueError("Invalid username or password.")
 
         raise ValueError("Invalid username or password.")
 

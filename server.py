@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import io
 import time
 import socket
@@ -7,11 +8,15 @@ import threading
 import subprocess
 from typing import Optional, Dict, Any, List
 import requests
-from fastapi import FastAPI, Query, HTTPException, Header, Request
+from fastapi import FastAPI, Query, Path, HTTPException, Header, Request, Depends
 from fastapi.responses import FileResponse, Response, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.background import BackgroundTask
+from cachetools import TTLCache
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 try:
     import qrcode
     from PIL import Image
@@ -31,13 +36,23 @@ import library_manager
 import playlist_manager
 from pydantic import BaseModel
 
+
+def to_dict(model: BaseModel) -> Dict[str, Any]:
+    """Compatibility helper for Pydantic v1 (.dict()) and v2 (.model_dump())."""
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
 class AuthRequest(BaseModel):
     username: str
     password: str
 
+
 class CreatePlaylistRequest(BaseModel):
     name: str
     description: Optional[str] = ""
+
 
 class AddTrackRequest(BaseModel):
     id: str
@@ -47,6 +62,7 @@ class AddTrackRequest(BaseModel):
     thumbnail: Optional[str] = ""
     album: Optional[str] = ""
 
+
 class FavoriteRequest(BaseModel):
     id: str
     title: str
@@ -54,6 +70,7 @@ class FavoriteRequest(BaseModel):
     duration: Optional[str] = ""
     thumbnail: Optional[str] = ""
     album: Optional[str] = ""
+
 
 class LibraryTrackRequest(BaseModel):
     id: str
@@ -64,23 +81,39 @@ class LibraryTrackRequest(BaseModel):
     album: Optional[str] = ""
     source: Optional[str] = "download"
 
-app = FastAPI(title="Spoti")
 
-# Initialize SQLite database
+limiter = Limiter(key_func=get_remote_address)
+app = FastAPI(title="Spoti")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Initialize database
 database.init_db()
 
-# In-memory TTL cache for high performance
+# General in-memory cache for home feed and explore
 _CACHE: Dict[str, Dict[str, Any]] = {}
 _CACHE_LOCK = threading.Lock()
 
-# Allow requests from local LAN devices and tunnels securely
+# Bounded in-memory resolution cache (300 items max, 24h TTL)
+_RESOLVE_CACHE: TTLCache = TTLCache(maxsize=300, ttl=86400)
+_RESOLVE_LOCK = threading.Lock()
+
+# Allow requests from local LAN devices, private subnets (including 172.16/12), and tunnels
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$",
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    return response
 
 
 def get_current_user_optional(authorization: Optional[str] = Header(None)) -> Optional[Dict[str, Any]]:
@@ -89,7 +122,13 @@ def get_current_user_optional(authorization: Optional[str] = Header(None)) -> Op
     token = authorization
     if authorization.startswith("Bearer "):
         token = authorization[7:]
-    return auth.verify_token(token)
+    try:
+        return auth.verify_token(token)
+    except auth.AuthServiceUnavailableError as e:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication service is temporarily unavailable. Please retry shortly."
+        )
 
 
 def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
@@ -156,7 +195,8 @@ def get_qr_code(request: Request):
 # Authentication Endpoints
 # -------------------------------------------------------------
 @app.post("/api/auth/register")
-def register(req: AuthRequest):
+@limiter.limit("10/minute")
+def register(request: Request, req: AuthRequest):
     try:
         data = auth.register_user(req.username, req.password)
         # Migrate any legacy playlists to the user
@@ -164,15 +204,20 @@ def register(req: AuthRequest):
         return data
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except auth.AuthServiceUnavailableError as e:
+        raise HTTPException(status_code=503, detail="Authentication service is temporarily unavailable.")
 
 
 @app.post("/api/auth/login")
-def login(req: AuthRequest):
+@limiter.limit("15/minute")
+def login(request: Request, req: AuthRequest):
     try:
         data = auth.authenticate_user(req.username, req.password)
         return data
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except auth.AuthServiceUnavailableError as e:
+        raise HTTPException(status_code=503, detail="Authentication service is temporarily unavailable.")
 
 
 @app.get("/api/auth/me")
@@ -190,10 +235,6 @@ def get_me(authorization: Optional[str] = Header(None)):
 
 
 import json
-
-# In-memory resolution cache
-_RESOLVE_CACHE: Dict[str, Dict[str, Any]] = {}
-_RESOLVE_LOCK = threading.Lock()
 
 _FETCH_IN_PROGRESS = False
 _FETCH_LOCK = threading.Lock()
@@ -443,7 +484,12 @@ def get_genre_tracks(genre_id: int):
 
 
 @app.get("/api/resolve")
-def resolve_track(title: str = Query(..., min_length=1), artist: str = Query("", min_length=0)):
+@limiter.limit("60/minute")
+def resolve_track(
+    request: Request,
+    title: str = Query(..., min_length=1, max_length=200),
+    artist: str = Query("", max_length=200)
+):
     """Resolves an external song title + artist to a playable YouTube track ID with in-memory caching."""
     clean_title = title.strip()
     clean_artist = artist.strip()
@@ -505,7 +551,12 @@ def resolve_track(title: str = Query(..., min_length=1), artist: str = Query("",
 
 
 @app.get("/api/search")
-def search(q: str = Query(..., min_length=1), filter_type: str = Query("songs")):
+@limiter.limit("45/minute")
+def search(
+    request: Request,
+    q: str = Query(..., min_length=1, max_length=150),
+    filter_type: str = Query("songs", max_length=30)
+):
     """Searches YouTube Music for tracks or playlists."""
     results = music_api.search_music(q, filter_type=filter_type, limit=25)
     return {"query": q, "results": results}
@@ -529,7 +580,10 @@ def get_mood_playlists(params: str = Query(...)):
 # Playlists & Favorites Endpoints (Multi-Tenant)
 # -------------------------------------------------------------
 @app.get("/api/playlist/{playlist_id}")
-def get_playlist(playlist_id: str, authorization: Optional[str] = Header(None)):
+def get_playlist(
+    playlist_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    authorization: Optional[str] = Header(None)
+):
     """Fetches full tracks for a playlist (User Custom / PocketBase, System, or YouTube Music)."""
     user = get_current_user_optional(authorization)
     uid = user["uid"] if user else None
@@ -558,12 +612,15 @@ def create_user_playlist(req: CreatePlaylistRequest, authorization: Optional[str
     user = get_current_user(authorization)
     if not req.name.strip():
         raise HTTPException(status_code=400, detail="Playlist name cannot be empty")
-    pl = playlist_manager.create_playlist(user["uid"], req.name, req.description or "")
+    pl = playlist_manager.create_playlist(user["uid"], req.name.strip()[:100], (req.description or "").strip()[:500])
     return pl
 
 
 @app.get("/api/user-playlists/{playlist_id}")
-def get_single_user_playlist(playlist_id: str, authorization: Optional[str] = Header(None)):
+def get_single_user_playlist(
+    playlist_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    authorization: Optional[str] = Header(None)
+):
     """Returns a specific custom playlist."""
     user = get_current_user_optional(authorization)
     uid = user["uid"] if user else None
@@ -574,17 +631,25 @@ def get_single_user_playlist(playlist_id: str, authorization: Optional[str] = He
 
 
 @app.post("/api/user-playlists/{playlist_id}/tracks")
-def add_track_to_user_playlist(playlist_id: str, track: AddTrackRequest, authorization: Optional[str] = Header(None)):
+def add_track_to_user_playlist(
+    track: AddTrackRequest,
+    playlist_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    authorization: Optional[str] = Header(None)
+):
     """Adds a track to a custom user playlist (requires authentication)."""
     user = get_current_user(authorization)
-    success = playlist_manager.add_track_to_playlist(playlist_id, track.dict(), user["uid"])
+    success = playlist_manager.add_track_to_playlist(playlist_id, to_dict(track), user["uid"])
     if not success:
         raise HTTPException(status_code=403, detail="Playlist not found or not owned")
     return {"message": "Track added to playlist successfully"}
 
 
 @app.delete("/api/user-playlists/{playlist_id}/tracks/{track_id}")
-def remove_track_from_user_playlist(playlist_id: str, track_id: str, authorization: Optional[str] = Header(None)):
+def remove_track_from_user_playlist(
+    playlist_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    track_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    authorization: Optional[str] = Header(None)
+):
     """Removes a track from a custom user playlist (requires authentication)."""
     user = get_current_user(authorization)
     success = playlist_manager.remove_track_from_playlist(playlist_id, track_id, user["uid"])
@@ -594,10 +659,15 @@ def remove_track_from_user_playlist(playlist_id: str, track_id: str, authorizati
 
 
 @app.delete("/api/user-playlists/{playlist_id}")
-def delete_user_playlist(playlist_id: str, authorization: Optional[str] = Header(None)):
+def delete_user_playlist(
+    playlist_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    authorization: Optional[str] = Header(None)
+):
     """Deletes a custom user playlist."""
     user = get_current_user(authorization)
     success = playlist_manager.delete_playlist(playlist_id, user["uid"])
+    if not success:
+        raise HTTPException(status_code=403, detail="Failed to delete playlist: playlist not found or not owned")
     return {"success": success}
 
 
@@ -614,19 +684,25 @@ def get_favorites(authorization: Optional[str] = Header(None)):
 @app.post("/api/favorites")
 def add_favorite(track: FavoriteRequest, authorization: Optional[str] = Header(None)):
     user = get_current_user(authorization)
-    success = playlist_manager.like_track(user["uid"], track.dict())
+    success = playlist_manager.like_track(user["uid"], to_dict(track))
     return {"success": success}
 
 
 @app.delete("/api/favorites/{track_id}")
-def delete_favorite(track_id: str, authorization: Optional[str] = Header(None)):
+def delete_favorite(
+    track_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    authorization: Optional[str] = Header(None)
+):
     user = get_current_user(authorization)
     success = playlist_manager.unlike_track(user["uid"], track_id)
     return {"success": success}
 
 
 @app.get("/api/favorites/check/{track_id}")
-def check_favorite(track_id: str, authorization: Optional[str] = Header(None)):
+def check_favorite(
+    track_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    authorization: Optional[str] = Header(None)
+):
     user = get_current_user_optional(authorization)
     if not user:
         return {"liked": False}
@@ -648,12 +724,15 @@ def get_user_library(authorization: Optional[str] = Header(None)):
 def add_user_library_track(track: LibraryTrackRequest, authorization: Optional[str] = Header(None)):
     """Adds a track to user's central library in PocketBase."""
     user = get_current_user(authorization)
-    success = playlist_manager.add_track_to_library(user["uid"], track.dict())
+    success = playlist_manager.add_track_to_library(user["uid"], to_dict(track))
     return {"success": success}
 
 
 @app.delete("/api/library/tracks/{track_id}")
-def remove_user_library_track(track_id: str, authorization: Optional[str] = Header(None)):
+def remove_user_library_track(
+    track_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    authorization: Optional[str] = Header(None)
+):
     """Removes a track from user's central library in PocketBase."""
     user = get_current_user(authorization)
     success = playlist_manager.remove_track_from_library(user["uid"], track_id)
@@ -661,7 +740,10 @@ def remove_user_library_track(track_id: str, authorization: Optional[str] = Head
 
 
 @app.get("/api/library/check/{track_id}")
-def check_user_library_track(track_id: str, authorization: Optional[str] = Header(None)):
+def check_user_library_track(
+    track_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    authorization: Optional[str] = Header(None)
+):
     """Checks if a track is in user's central library."""
     user = get_current_user_optional(authorization)
     if not user:
@@ -673,24 +755,28 @@ def check_user_library_track(track_id: str, authorization: Optional[str] = Heade
 # Audio Playback, Radio & Download Endpoints
 # -------------------------------------------------------------
 @app.get("/api/radio/{video_id}")
-def get_radio(video_id: str):
+def get_radio(video_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{11}$")):
     """Generates continuous radio recommendations based on a track."""
     tracks = music_api.get_radio_tracks(video_id, limit=35)
     return {"tracks": tracks}
 
 
 @app.get("/api/stream/{video_id}")
-def get_stream(video_id: str):
+def get_stream(video_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{11}$")):
     """Resolves audio stream URL or local downloaded file path."""
     try:
         data = stream_downloader.get_cached_or_local_stream(video_id)
         return data
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Stream resolution error for {video_id}: {e}", file=sys.stderr)
+        raise HTTPException(status_code=500, detail="Could not resolve audio stream")
 
 
 @app.api_route("/api/download/stream/{video_id}", methods=["GET", "HEAD"])
-def stream_download_proxy(video_id: str, request: Request):
+def stream_download_proxy(
+    request: Request,
+    video_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{11}$")
+):
     """
     High-performance audio streaming endpoint.
     1. Serves directly from server SSD cache (/var/mobile/server/data/music_cache) if present (<10ms).
@@ -701,9 +787,16 @@ def stream_download_proxy(video_id: str, request: Request):
         # Check if local cached audio exists first
         local_path = stream_downloader.get_cached_audio_path(video_id)
         if local_path and os.path.isfile(local_path):
-            filename = os.path.basename(local_path)
-            media_type = "audio/mpeg" if local_path.endswith(".mp3") else "audio/mp4"
-            return FileResponse(local_path, media_type=media_type, filename=filename)
+            if local_path.endswith(".mp3"):
+                media_type = "audio/mpeg"
+            elif local_path.endswith(".webm"):
+                media_type = "audio/webm"
+            elif local_path.endswith(".opus"):
+                media_type = "audio/ogg"
+            else:
+                media_type = "audio/mp4"
+            # Return inline audio stream without forcing attachment download
+            return FileResponse(local_path, media_type=media_type)
 
         data = stream_downloader.get_cached_or_local_stream(video_id)
         stream_url = data.get("url")
@@ -749,10 +842,31 @@ def stream_download_proxy(video_id: str, request: Request):
         part_path = os.path.join(stream_downloader.CACHE_DIR, f".part_{video_id}_{worker_id}.m4a")
         final_path = os.path.join(stream_downloader.CACHE_DIR, f"{video_id}.m4a")
 
-        # Only cache to server disk if this is a full stream from byte 0
+        # Determine if this stream represents the 100% full audio track (never cache a partial range slice)
+        expected_total_bytes = None
+        is_full_stream = False
+
+        if req.status_code == 200:
+            if content_length and content_length.isdigit():
+                expected_total_bytes = int(content_length)
+                is_full_stream = True
+        elif req.status_code == 206 and content_range:
+            # Format: bytes start-end/total
+            cr_match = re.match(r"^bytes\s+(\d+)-(\d+)/(\d+)$", content_range.strip())
+            if cr_match:
+                s_byte = int(cr_match.group(1))
+                e_byte = int(cr_match.group(2))
+                tot_bytes = int(cr_match.group(3))
+                # Only a full stream if it starts at 0 and delivers up to total - 1
+                if s_byte == 0 and (e_byte + 1) == tot_bytes:
+                    expected_total_bytes = tot_bytes
+                    is_full_stream = True
+
         can_cache_locally = (
-            (not client_range or client_range.startswith("bytes=0-")) and
-            (req.status_code == 200 or (content_range and content_range.startswith("bytes 0-")))
+            is_full_stream and 
+            expected_total_bytes is not None and 
+            expected_total_bytes > 50000 and 
+            (not client_range or client_range.strip() in ("", "bytes=0-"))
         )
 
         def iter_chunks():
@@ -778,11 +892,29 @@ def stream_download_proxy(video_id: str, request: Request):
                 if f:
                     f.close()
                     f = None
-                    if total_written > 100000:
+                    # Verify stream was 100% completed to the exact expected length
+                    if can_cache_locally and expected_total_bytes and total_written == expected_total_bytes:
+                        # Validate audio container with mutagen before promoting to permanent cache
+                        is_valid = True
                         try:
-                            os.replace(part_path, final_path)
+                            import mutagen
+                            audio_meta = mutagen.File(part_path)
+                            if audio_meta is None or getattr(getattr(audio_meta, "info", None), "length", 0) <= 0:
+                                is_valid = False
                         except Exception:
-                            pass
+                            is_valid = False
+
+                        if is_valid:
+                            try:
+                                os.replace(part_path, final_path)
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                if os.path.exists(part_path):
+                                    os.remove(part_path)
+                            except Exception:
+                                pass
                     else:
                         try:
                             if os.path.exists(part_path):
@@ -811,20 +943,42 @@ def stream_download_proxy(video_id: str, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"stream_download_proxy error: {e}", file=sys.stderr)
+        raise HTTPException(status_code=500, detail="Audio streaming error")
 
 
 @app.post("/api/download/{video_id}")
-def trigger_download(video_id: str, title: str = "", artist: str = ""):
-    """Queues a track for MP3 download with ID3 tags and cover art."""
-    stream_downloader.download_track(video_id, title=title, artist=artist)
+@limiter.limit("20/minute")
+def trigger_download(
+    request: Request,
+    video_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{11}$"),
+    title: str = Query("", max_length=200),
+    artist: str = Query("", max_length=200),
+    authorization: Optional[str] = Header(None)
+):
+    """Queues a track for MP3 download with ID3 tags and cover art (requires auth)."""
+    user = get_current_user(authorization)
+    stream_downloader.download_track(video_id, title=title, artist=artist, user_id=user["uid"])
     return {"message": "Download initiated", "videoId": video_id}
 
 
 @app.get("/api/downloads/status")
-def get_downloads_status():
-    """Returns status of ongoing and completed downloads."""
-    return stream_downloader.DOWNLOAD_STATUS
+def get_downloads_status(authorization: Optional[str] = Header(None)):
+    """Returns status of ongoing and completed downloads scoped strictly to caller."""
+    user = get_current_user_optional(authorization)
+    uid = user["uid"] if user else None
+    with stream_downloader._DOWNLOAD_LOCK:
+        return {
+            vid: {
+                "status": s.get("status"),
+                "percent": s.get("percent", 0.0),
+                "title": s.get("title", ""),
+                "artist": s.get("artist", ""),
+                "error": s.get("error")
+            }
+            for vid, s in stream_downloader.DOWNLOAD_STATUS.items()
+            if (uid is None or s.get("user_id") == uid or s.get("user_id") is None)
+        }
 
 
 @app.get("/api/download/file/{video_id}")
@@ -905,7 +1059,7 @@ def serve_manifest():
     raise HTTPException(status_code=404, detail="manifest.json not found")
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def serve_index():
     index_file = os.path.join(static_dir, "index.html")
     if os.path.isfile(index_file):

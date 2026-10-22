@@ -74,15 +74,17 @@ def get_all_playlists(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     # 3. Include Custom User Playlists from PocketBase
     try:
         admin_pb = database.get_admin_pb()
+        esc_uid = database.pb_escape(user_id)
         playlists_res = admin_pb.collection("playlists").get_full_list(
-            query_params={"filter": f'user = "{user_id}"', "sort": "-created"}
+            query_params={"filter": f'user = "{esc_uid}"', "sort": "-created"}
         )
 
         for pl in playlists_res:
             # Query track count
             try:
+                esc_pid = database.pb_escape(pl.id)
                 tracks_check = admin_pb.collection("playlist_tracks").get_list(
-                    1, 1, query_params={"filter": f'playlist = "{pl.id}"'}
+                    1, 1, query_params={"filter": f'playlist = "{esc_pid}"'}
                 )
                 cnt = tracks_check.total_items
             except Exception:
@@ -173,9 +175,15 @@ def get_playlist(playlist_id: str, user_id: Optional[str] = None) -> Optional[Di
         if not pl:
             return None
 
-        # Fetch tracks in playlist
+        # Enforce ownership check or explicit public visibility
+        is_public = getattr(pl, "is_public", False)
+        if not is_public and (not user_id or pl.user != user_id):
+            return None
+
+        # Fetch tracks in playlist with escaped playlist_id
+        esc_pid = database.pb_escape(playlist_id)
         tracks_records = admin_pb.collection("playlist_tracks").get_full_list(
-            query_params={"filter": f'playlist = "{playlist_id}"', "sort": "created"}
+            query_params={"filter": f'playlist = "{esc_pid}"', "sort": "created"}
         )
 
         tracks = [{
@@ -234,8 +242,10 @@ def add_track_to_playlist(playlist_id: str, track: Dict[str, Any], user_id: Opti
             return False
 
         # Check if already in playlist
+        esc_pid = database.pb_escape(playlist_id)
+        esc_tid = database.pb_escape(track_id)
         existing = admin_pb.collection("playlist_tracks").get_list(
-            1, 1, query_params={"filter": f'playlist = "{playlist_id}" && track_id = "{track_id}"'}
+            1, 1, query_params={"filter": f'playlist = "{esc_pid}" && track_id = "{esc_tid}"'}
         )
         if existing.total_items > 0:
             return True
@@ -257,19 +267,13 @@ def add_track_to_playlist(playlist_id: str, track: Dict[str, Any], user_id: Opti
 
 def remove_track_from_playlist(playlist_id: str, track_id: str, user_id: Optional[str] = None) -> bool:
     """Removes a track from a playlist in PocketBase with strict ownership verification."""
-    if not user_id:
+    if not user_id or not track_id:
         return False
 
     if playlist_id == "user_pl_offline_downloads":
-        try:
-            import stream_downloader
-            path = stream_downloader.get_local_track_path(track_id)
-            if path and os.path.isfile(path):
-                os.remove(path)
-                return True
-        except Exception:
-            return False
-        return False
+        # Decouple user removal from deleting shared audio cache files!
+        # Only unlinks the track from the user's library in PocketBase.
+        return remove_track_from_library(user_id, track_id)
 
     if playlist_id == "user_pl_liked_songs":
         return unlike_track(user_id, track_id)
@@ -281,8 +285,10 @@ def remove_track_from_playlist(playlist_id: str, track_id: str, user_id: Optiona
         if getattr(pl, "user", None) != user_id:
             return False
 
+        esc_pid = database.pb_escape(playlist_id)
+        esc_tid = database.pb_escape(track_id)
         existing = admin_pb.collection("playlist_tracks").get_list(
-            1, 1, query_params={"filter": f'playlist = "{playlist_id}" && track_id = "{track_id}"'}
+            1, 1, query_params={"filter": f'playlist = "{esc_pid}" && track_id = "{esc_tid}"'}
         )
         for item in existing.items:
             admin_pb.collection("playlist_tracks").delete(item.id)
@@ -293,19 +299,17 @@ def remove_track_from_playlist(playlist_id: str, track_id: str, user_id: Optiona
 
 
 def delete_playlist(playlist_id: str, user_id: Optional[str] = None) -> bool:
-    """Deletes a playlist from PocketBase (cascade deletes its tracks)."""
+    """Deletes a playlist from PocketBase (cascade deletes its tracks). Requires user_id ownership."""
+    if not user_id or not playlist_id:
+        return False
     if playlist_id in ("user_pl_offline_downloads", "user_pl_liked_songs"):
         return False
 
     admin_pb = database.get_admin_pb()
     try:
-        if user_id:
-            try:
-                pl = admin_pb.collection("playlists").get_one(playlist_id)
-                if not pl or pl.user != user_id:
-                    return False
-            except Exception:
-                return False
+        pl = admin_pb.collection("playlists").get_one(playlist_id)
+        if not pl or getattr(pl, "user", None) != user_id:
+            return False
 
         admin_pb.collection("playlists").delete(playlist_id)
         return True
@@ -324,8 +328,9 @@ def get_user_liked_tracks(user_id: str) -> List[Dict[str, Any]]:
 
     admin_pb = database.get_admin_pb()
     try:
+        esc_uid = database.pb_escape(user_id)
         favs = admin_pb.collection("user_favorites").get_full_list(
-            query_params={"filter": f'user = "{user_id}"', "sort": "-created"}
+            query_params={"filter": f'user = "{esc_uid}"', "sort": "-created"}
         )
         return [{
             "id": f.track_id,
@@ -352,8 +357,10 @@ def like_track(user_id: str, track: Dict[str, Any]) -> bool:
 
     admin_pb = database.get_admin_pb()
     try:
+        esc_uid = database.pb_escape(user_id)
+        esc_tid = database.pb_escape(track_id)
         existing = admin_pb.collection("user_favorites").get_list(
-            1, 1, query_params={"filter": f'user = "{user_id}" && track_id = "{track_id}"'}
+            1, 1, query_params={"filter": f'user = "{esc_uid}" && track_id = "{esc_tid}"'}
         )
         if existing.total_items > 0:
             return True
@@ -374,17 +381,21 @@ def like_track(user_id: str, track: Dict[str, Any]) -> bool:
 
 
 def unlike_track(user_id: str, track_id: str) -> bool:
-    """Removes a track from the user's favorites in PocketBase."""
+    """Removes a track from the user's favorites in PocketBase with strict ownership verification."""
     if not user_id or not track_id:
         return False
 
     admin_pb = database.get_admin_pb()
     try:
+        esc_uid = database.pb_escape(user_id)
+        esc_tid = database.pb_escape(track_id)
         existing = admin_pb.collection("user_favorites").get_list(
-            1, 10, query_params={"filter": f'user = "{user_id}" && track_id = "{track_id}"'}
+            1, 10, query_params={"filter": f'user = "{esc_uid}" && track_id = "{esc_tid}"'}
         )
         for item in existing.items:
-            admin_pb.collection("user_favorites").delete(item.id)
+            # Re-verify ownership before deleting
+            if getattr(item, "user", None) == user_id:
+                admin_pb.collection("user_favorites").delete(item.id)
         return True
     except Exception as e:
         print(f"Error unliking track {track_id} in PocketBase: {e}", file=sys.stderr)
@@ -398,8 +409,10 @@ def is_track_liked(user_id: str, track_id: str) -> bool:
 
     admin_pb = database.get_admin_pb()
     try:
+        esc_uid = database.pb_escape(user_id)
+        esc_tid = database.pb_escape(track_id)
         existing = admin_pb.collection("user_favorites").get_list(
-            1, 1, query_params={"filter": f'user = "{user_id}" && track_id = "{track_id}"'}
+            1, 1, query_params={"filter": f'user = "{esc_uid}" && track_id = "{esc_tid}"'}
         )
         return existing.total_items > 0
     except Exception:
@@ -416,8 +429,9 @@ def get_user_library_tracks(user_id: str) -> List[Dict[str, Any]]:
 
     admin_pb = database.get_admin_pb()
     try:
+        esc_uid = database.pb_escape(user_id)
         records = admin_pb.collection("user_library").get_full_list(
-            query_params={"filter": f'user = "{user_id}"', "sort": "-created"}
+            query_params={"filter": f'user = "{esc_uid}"', "sort": "-created"}
         )
         return [{
             "id": r.track_id,
@@ -446,8 +460,10 @@ def add_track_to_library(user_id: str, track: Dict[str, Any]) -> bool:
 
     admin_pb = database.get_admin_pb()
     try:
+        esc_uid = database.pb_escape(user_id)
+        esc_tid = database.pb_escape(track_id)
         existing = admin_pb.collection("user_library").get_list(
-            1, 1, query_params={"filter": f'user = "{user_id}" && track_id = "{track_id}"'}
+            1, 1, query_params={"filter": f'user = "{esc_uid}" && track_id = "{esc_tid}"'}
         )
         if existing.total_items > 0:
             return True
@@ -469,17 +485,21 @@ def add_track_to_library(user_id: str, track: Dict[str, Any]) -> bool:
 
 
 def remove_track_from_library(user_id: str, track_id: str) -> bool:
-    """Removes a track from the user's central library in PocketBase."""
+    """Removes a track from the user's central library in PocketBase with strict ownership verification."""
     if not user_id or not track_id:
         return False
 
     admin_pb = database.get_admin_pb()
     try:
+        esc_uid = database.pb_escape(user_id)
+        esc_tid = database.pb_escape(track_id)
         existing = admin_pb.collection("user_library").get_list(
-            1, 10, query_params={"filter": f'user = "{user_id}" && track_id = "{track_id}"'}
+            1, 10, query_params={"filter": f'user = "{esc_uid}" && track_id = "{esc_tid}"'}
         )
         for item in existing.items:
-            admin_pb.collection("user_library").delete(item.id)
+            # Re-verify ownership before deleting
+            if getattr(item, "user", None) == user_id:
+                admin_pb.collection("user_library").delete(item.id)
         return True
     except Exception as e:
         print(f"Error removing track {track_id} from user library in PocketBase: {e}", file=sys.stderr)
@@ -493,9 +513,12 @@ def is_track_in_library(user_id: str, track_id: str) -> bool:
 
     admin_pb = database.get_admin_pb()
     try:
+        esc_uid = database.pb_escape(user_id)
+        esc_tid = database.pb_escape(track_id)
         existing = admin_pb.collection("user_library").get_list(
-            1, 1, query_params={"filter": f'user = "{user_id}" && track_id = "{track_id}"'}
+            1, 1, query_params={"filter": f'user = "{esc_uid}" && track_id = "{esc_tid}"'}
         )
         return existing.total_items > 0
     except Exception:
+        return False
         return False

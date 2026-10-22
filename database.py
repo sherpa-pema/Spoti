@@ -36,6 +36,14 @@ PB_URL = os.environ.get("POCKETBASE_URL", "http://192.168.1.67:8090")
 SUPERUSER_EMAIL = os.environ.get("PB_SUPERUSER_EMAIL", "")
 SUPERUSER_PASSWORD = os.environ.get("PB_SUPERUSER_PASSWORD", "")
 
+
+def pb_escape(val: Any) -> str:
+    """Escapes backslashes and double quotes for PocketBase filter strings."""
+    if val is None:
+        return ""
+    return str(val).replace("\\", "\\\\").replace('"', '\\"')
+
+
 _ADMIN_CLIENT: Optional[PocketBase] = None
 _ADMIN_TOKEN_EXP: float = 0
 _ADMIN_LOCK = threading.Lock()
