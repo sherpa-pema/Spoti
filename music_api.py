@@ -231,25 +231,80 @@ def search_music(query: str, filter_type: str = "songs", limit: int = 25) -> Lis
 def get_radio_tracks(video_id: str, limit: int = 35) -> List[Dict[str, Any]]:
     """Generates continuous radio recommendation tracks based on a song videoId."""
     ytm = get_ytm()
+    tracks: List[Dict[str, Any]] = []
+
+    # 1. Primary: Safe direct watch-next playlist panel extraction
+    # Bypasses the broken related_browse_id tab lookup in ytmusicapi 1.10.x
     try:
-        wp = ytm.get_watch_playlist(videoId=video_id, limit=limit)
-        tracks = []
-        for t in wp.get("tracks", []):
-            vid = t.get("videoId")
-            # Don't repeat the seed song as first item if user already playing it
-            if vid:
-                tracks.append({
-                    "id": vid,
-                    "title": t.get("title", "Unknown Title"),
-                    "artist": _format_artists(t.get("artists")),
-                    "album": t.get("album", {}).get("name") if isinstance(t.get("album"), dict) else (t.get("album") or ""),
-                    "duration": t.get("duration", "--:--"),
-                    "thumbnail": _get_best_thumbnail(t.get("thumbnails")),
-                })
-        return tracks[:limit]
+        from ytmusicapi.parsers.watch import parse_watch_playlist
+        endpoint = "next"
+        body = {
+            "enablePersistentPlaylistPanel": True,
+            "isAudioOnly": True,
+            "tunerSettingValue": "AUTOMIX_SETTING_NORMAL",
+            "videoId": video_id,
+            "playlistId": f"RDAMVM{video_id}"
+        }
+        resp = ytm._send_request(endpoint, body)
+        watch_next = (
+            resp.get("contents", {})
+            .get("singleColumnMusicWatchNextResultsRenderer", {})
+            .get("tabbedRenderer", {})
+            .get("watchNextTabbedResultsRenderer", {})
+        )
+        tabs = watch_next.get("tabs", [])
+        if tabs:
+            tab0 = (
+                tabs[0]
+                .get("tabRenderer", {})
+                .get("content", {})
+                .get("musicQueueRenderer", {})
+                .get("content", {})
+                .get("playlistPanelRenderer", {})
+            )
+            contents = tab0.get("contents", [])
+            raw_tracks = parse_watch_playlist(contents)
+            for t in raw_tracks:
+                vid = t.get("videoId")
+                if vid and vid != video_id:
+                    album_val = t.get("album")
+                    album_name = album_val.get("name") if isinstance(album_val, dict) else (album_val or "")
+                    thumb_val = t.get("thumbnail") or t.get("thumbnails")
+                    tracks.append({
+                        "id": vid,
+                        "title": t.get("title", "Unknown Title"),
+                        "artist": _format_artists(t.get("artists")),
+                        "album": album_name,
+                        "duration": t.get("length") or t.get("duration") or "--:--",
+                        "thumbnail": _get_best_thumbnail(thumb_val),
+                    })
     except Exception as e:
-        print(f"Error fetching watch radio: {e}")
-        return []
+        print(f"Notice: Direct watch radio extraction error: {e}")
+
+    # 2. Resilient Fallback: If watch panel returned no tracks
+    if not tracks:
+        try:
+            search_results = ytm.search(f"{video_id}", filter="songs", limit=limit)
+            if not search_results:
+                search_results = ytm.search("top hits", filter="songs", limit=limit)
+            for item in search_results:
+                vid = item.get("videoId")
+                if vid and vid != video_id:
+                    album_val = item.get("album")
+                    album_name = album_val.get("name") if isinstance(album_val, dict) else (album_val or "")
+                    thumb_val = item.get("thumbnail") or item.get("thumbnails")
+                    tracks.append({
+                        "id": vid,
+                        "title": item.get("title", "Unknown Title"),
+                        "artist": _format_artists(item.get("artists")),
+                        "album": album_name,
+                        "duration": item.get("duration", "--:--"),
+                        "thumbnail": _get_best_thumbnail(thumb_val),
+                    })
+        except Exception as e2:
+            print(f"Fallback radio search error: {e2}")
+
+    return tracks[:limit]
 
 
 def get_playlist_details(playlist_id: str) -> Dict[str, Any]:

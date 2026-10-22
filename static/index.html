@@ -562,16 +562,19 @@
         </button>
       </div>
 
-      <!-- Up Next / Radio Accordion -->
-      <div class="pt-2">
-        <div class="flex items-center justify-between text-xs text-gray-400 font-semibold uppercase tracking-wider mb-2">
-          <span>Up Next & Radio</span>
+      <!-- Up Next / Queue Section -->
+      <div class="pt-3 pb-6 border-t border-white/5 space-y-2">
+        <div class="flex items-center justify-between text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">
+          <span class="flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+            <span>Up Next</span>
+          </span>
           <div class="flex items-center gap-2">
-            <span id="queue-count" class="text-indigo-400"></span>
+            <span id="queue-count" class="text-indigo-400 font-mono text-[11px]"></span>
             <button onclick="clearUpcomingQueue()" class="text-[11px] text-red-400/80 hover:text-red-300 capitalize font-medium transition hover:underline">clear</button>
           </div>
         </div>
-        <div id="drawer-queue-container" class="max-h-40 overflow-y-auto space-y-1.5 pr-1"></div>
+        <div id="drawer-queue-container" class="max-h-72 sm:max-h-96 overflow-y-auto space-y-2 pr-1"></div>
       </div>
     </div>
   </div>
@@ -964,8 +967,9 @@
 
     function playTrackNext(track) {
       triggerHaptic('medium');
+      const taggedTrack = { ...track, _source: 'user_queue' };
       if (!currentTrack || queue.length === 0) {
-        playTrackFromList(track, [track]);
+        playTrackFromList(taggedTrack, [taggedTrack], 'queue', 'User Queue');
         showToast(`Playing "${track.title}" now`);
         return;
       }
@@ -973,7 +977,7 @@
       // Remove existing duplicate if already upcoming in queue
       queue = queue.filter((t, idx) => idx <= queueIndex || t.id !== track.id);
       // Insert right after current song
-      queue.splice(queueIndex + 1, 0, track);
+      queue.splice(queueIndex + 1, 0, taggedTrack);
       if (isShuffle) initShuffledQueue();
       schedulePreloadNextTrack(800);
       renderDrawerQueue();
@@ -982,13 +986,14 @@
 
     function addTrackToQueue(track) {
       triggerHaptic('medium');
+      const taggedTrack = { ...track, _source: 'user_queue' };
       if (!currentTrack || queue.length === 0) {
-        playTrackFromList(track, [track]);
+        playTrackFromList(taggedTrack, [taggedTrack], 'queue', 'User Queue');
         showToast(`Playing "${track.title}" now`);
         return;
       }
 
-      queue.push(track);
+      queue.push(taggedTrack);
       if (isShuffle) initShuffledQueue();
       renderDrawerQueue();
       showToast(`Added to queue: "${track.title}"`);
@@ -3227,7 +3232,7 @@
           thumbnail: item.thumbnail,
           duration: item.duration || '--:--'
         };
-        playTrackFromList(playItem, listContext);
+        playTrackFromList(playItem, listContext, 'explore', item.source || 'Explore');
         return;
       }
 
@@ -3257,7 +3262,7 @@
             thumbnail: item.thumbnail || data.track.thumbnail,
             duration: data.track.duration || '--:--'
           };
-          await playTrackFromList(playItem, listContext);
+          await playTrackFromList(playItem, listContext, 'explore', item.source || 'Explore');
         } else {
           showToast('⚠️ Could not match song on YouTube');
         }
@@ -3713,7 +3718,7 @@
             `;
           } else {
             const isLiked = userLikedTrackIds.has(item.id);
-            row.onclick = () => playTrackFromList(item, data.results.filter(r => r.type === 'song'));
+            row.onclick = () => playTrackFromList(item, [item], 'search', 'Search: ' + item.title);
             row.innerHTML = `
               <div class="relative w-12 h-12 rounded-lg overflow-hidden bg-white/5 shrink-0 flex items-center justify-center">
                 ${item.thumbnail ? `<img src="${item.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="art">` : ''}
@@ -3841,7 +3846,7 @@
         mergedTracks.forEach((t, i) => {
           const row = document.createElement('div');
           row.className = "glass-card p-2.5 rounded-xl flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer";
-          row.onclick = () => playTrackFromList(t, mergedTracks);
+          row.onclick = () => playTrackFromList(t, mergedTracks, 'playlist', 'Downloaded Songs');
 
           let badgeMarkup = '';
           if (t.isOnDevice) {
@@ -3986,7 +3991,7 @@
         if (activePlaylistId === 'user_pl_offline_downloads') {
           const offlineTracks = await SpotiDB.getAllTracks();
           if (offlineTracks.length > 0) {
-            playTrackFromList(offlineTracks[0], offlineTracks);
+            playTrackFromList(offlineTracks[0], offlineTracks, 'playlist', 'Downloaded Songs');
           }
           return;
         }
@@ -4010,7 +4015,7 @@
         }
 
         if (tracks.length > 0) {
-          playTrackFromList(tracks[0], tracks);
+          playTrackFromList(tracks[0], tracks, 'playlist', 'Playlist');
         } else {
           showToast("Playlist is empty");
         }
@@ -4277,10 +4282,23 @@
       }
     }
 
-    async function playTrackFromList(track, trackList = []) {
+    async function playTrackFromList(track, trackList = [], source = 'playlist', sourceLabel = '') {
       currentTrack = track;
-      queue = [...trackList];
-      queueIndex = queue.findIndex(t => t.id === track.id);
+      currentTrack._source = track._source || (trackList.length <= 1 ? 'single' : source);
+      if (sourceLabel) currentTrack._sourceLabel = sourceLabel;
+
+      queue = trackList.map(t => ({
+        ...t,
+        _source: t._source || (trackList.length <= 1 ? 'single' : source),
+        _sourceLabel: t._sourceLabel || sourceLabel
+      }));
+
+      // Match track in queue robustly by id, yt_id, or original_id
+      queueIndex = queue.findIndex(t => 
+        t.id === track.id || 
+        (t.yt_id && (t.yt_id === track.id || t.yt_id === track.yt_id)) || 
+        (track.yt_id && t.id === track.yt_id)
+      );
       if (queueIndex === -1) queueIndex = 0;
 
       if (isShuffle) {
@@ -4435,8 +4453,27 @@
         activeLyricsTrackId = null;
       }
 
+      // Update drawer Playing From label
+      const srcLabel = document.getElementById('drawer-source-label');
+      if (srcLabel) {
+        if (track._sourceLabel) {
+          srcLabel.innerText = track._sourceLabel;
+        } else if (track._source === 'user_queue') {
+          srcLabel.innerText = 'Queued Song';
+        } else if (track._source === 'radio') {
+          srcLabel.innerText = 'Song Radio';
+        } else if (track.blob || track.isOnDevice || track.is_local || activePlaylistId === 'user_pl_offline_downloads') {
+          srcLabel.innerText = 'Downloaded Library';
+        } else if (activePlaylistId) {
+          srcLabel.innerText = 'Playlist';
+        } else {
+          srcLabel.innerText = 'YouTube Music';
+        }
+      }
+
       updateTrackRowEqualizers();
       updateMediaSession(track);
+      renderDrawerQueue();
     }
 
     function togglePlayPause() {
@@ -4635,14 +4672,37 @@
     }
 
     async function fetchRadioRecommendations(videoId) {
-      if (!navigator.onLine) return;
+      if (!navigator.onLine || !videoId) return;
+
+      // Resolve YouTube video ID if an external ID was provided
+      let targetId = videoId;
+      if (targetId.startsWith('ext_')) {
+        if (currentTrack && currentTrack.yt_id) {
+          targetId = currentTrack.yt_id;
+        } else {
+          return;
+        }
+      }
+
       try {
-        const res = await fetch(`/api/radio/${videoId}`);
+        const res = await fetch(`/api/radio/${targetId}`);
         const data = await res.json();
         if (data.tracks && data.tracks.length > 0) {
           const existingIds = new Set(queue.map(t => t.id));
-          const newTracks = data.tracks.filter(t => !existingIds.has(t.id));
-          queue = queue.concat(newTracks);
+          if (currentTrack) existingIds.add(currentTrack.id);
+
+          const newTracks = data.tracks
+            .filter(t => !existingIds.has(t.id))
+            .map(t => ({ ...t, _source: 'radio' }));
+
+          // Keep all tracks up to queueIndex, plus any user-queued tracks and playlist tracks
+          const preserved = queue.filter((t, idx) => 
+            idx <= queueIndex || t._source === 'user_queue' || t._source === 'playlist'
+          );
+
+          queue = preserved.concat(newTracks);
+          if (isShuffle) initShuffledQueue();
+          schedulePreloadNextTrack(1500);
           renderDrawerQueue();
         }
       } catch (e) {
@@ -4653,12 +4713,19 @@
     function renderDrawerQueue() {
       const container = document.getElementById('drawer-queue-container');
       const countEl = document.getElementById('queue-count');
-      if (!container || !countEl) return;
-      const upcoming = queue.slice(queueIndex + 1);
-      countEl.innerText = `${upcoming.length} up next`;
+      if (!container) return;
+
+      const upcoming = (queueIndex >= 0 && queueIndex < queue.length)
+        ? queue.slice(queueIndex + 1)
+        : [];
+
+      if (countEl) {
+        countEl.innerText = upcoming.length > 0 ? `${upcoming.length} upcoming` : '';
+      }
+
       container.innerHTML = '';
 
-      if (upcoming.length === 0) {
+      if (upcoming.length === 0 && !currentTrack) {
         container.innerHTML = `
           <div class="py-6 text-center text-gray-500 text-xs">
             No upcoming songs. Use <b>Play Next</b> or <b>Add to Queue</b> to queue up more!
@@ -4667,31 +4734,189 @@
         return;
       }
 
-      upcoming.slice(0, 25).forEach((t, i) => {
+      // Next in Line track (the immediate next song scheduled to play)
+      const nextTrack = peekNextTrack();
+
+      // Categorize upcoming tracks
+      const userQueued = [];
+      const playlistUpcoming = [];
+      const radioUpcoming = [];
+
+      upcoming.forEach((t, i) => {
         const realIdx = queueIndex + 1 + i;
+        const itemWithIdx = { ...t, _realIdx: realIdx };
+        if (t._source === 'user_queue') {
+          userQueued.push(itemWithIdx);
+        } else if (t._source === 'radio') {
+          radioUpcoming.push(itemWithIdx);
+        } else {
+          playlistUpcoming.push(itemWithIdx);
+        }
+      });
+
+      const fragment = document.createDocumentFragment();
+
+      // -------------------------------------------------------------
+      // Section 1: Prominent "Next in Line" Card
+      // -------------------------------------------------------------
+      if (nextTrack) {
+        const nextCard = document.createElement('div');
+        nextCard.className = "mb-3 p-3 rounded-2xl bg-gradient-to-r from-indigo-950/40 via-purple-950/20 to-indigo-950/40 border border-indigo-500/20 shadow-lg shadow-indigo-950/30 flex items-center justify-between gap-3 group";
+
+        let badgeText = "▶ Next in Line";
+        let badgeStyle = "bg-indigo-500/20 text-indigo-300 border-indigo-500/30";
+        if (nextTrack._source === 'user_queue') {
+          badgeText = "▶ Next (Queued by You)";
+          badgeStyle = "bg-purple-500/20 text-purple-300 border-purple-500/30";
+        } else if (nextTrack._source === 'radio') {
+          badgeText = "📻 Next (Radio Autoplay)";
+          badgeStyle = "bg-amber-500/20 text-amber-300 border-amber-500/30";
+        } else if (activePlaylistId === 'user_pl_offline_downloads' || nextTrack.isOnDevice || nextTrack.blob) {
+          badgeText = "✓ Next (Downloaded Library)";
+          badgeStyle = "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
+        }
+
+        nextCard.innerHTML = `
+          <div class="flex items-center gap-3 min-w-0 flex-1 cursor-pointer" onclick="playNext()">
+            <div class="relative w-12 h-12 rounded-xl overflow-hidden bg-black/50 shrink-0 border border-white/10 shadow">
+              <img src="${nextTrack.thumbnail}" class="w-full h-full object-cover group-hover:scale-105 transition" alt="art" onerror="this.src='https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&q=80'">
+              <div class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                <svg class="w-5 h-5 fill-white ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              </div>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5 mb-0.5">
+                <span class="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${badgeStyle}">${badgeText}</span>
+              </div>
+              <div class="text-sm font-semibold text-white line-clamp-1 group-hover:text-indigo-200 transition">${nextTrack.title}</div>
+              <div class="text-xs text-gray-400 line-clamp-1">${nextTrack.artist}</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0 pl-2">
+            <span class="text-gray-400 font-mono text-[11px]">${nextTrack.duration || ''}</span>
+            <button onclick="playNext()" class="p-2 text-indigo-400 hover:text-white rounded-full bg-indigo-500/10 hover:bg-indigo-500/25 active:scale-95 transition" title="Skip to this song">
+              <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+            </button>
+          </div>
+        `;
+        fragment.appendChild(nextCard);
+      }
+
+      // Helper to render an item row
+      function createTrackRow(item) {
         const row = document.createElement('div');
         row.className = "flex items-center justify-between p-2 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer text-xs group";
         row.onclick = () => {
-          queueIndex = realIdx;
-          loadAndPlayTrack(t);
+          queueIndex = item._realIdx;
+          loadAndPlayTrack(item);
         };
         row.innerHTML = `
           <div class="flex items-center gap-2.5 min-w-0 flex-1">
-            <img src="${t.thumbnail}" class="w-8 h-8 rounded-lg object-cover bg-black/40 shrink-0" alt="art">
+            <img src="${item.thumbnail}" class="w-8 h-8 rounded-lg object-cover bg-black/40 shrink-0" alt="art" onerror="this.src='https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&q=80'">
             <div class="min-w-0 flex-1">
-              <div class="font-medium text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${t.title}</span>${renderEqIndicatorHtml(t.id, t.title)}</div>
-              <div class="text-[11px] text-gray-400 line-clamp-1">${t.artist}</div>
+              <div class="font-medium text-white line-clamp-1 flex items-center gap-1.5">
+                <span class="truncate">${item.title}</span>
+                ${renderEqIndicatorHtml(item.id, item.title)}
+              </div>
+              <div class="text-[11px] text-gray-400 line-clamp-1">${item.artist}</div>
             </div>
           </div>
           <div class="flex items-center gap-2 pl-2">
-            <span class="text-gray-500 font-mono text-[10px]">${t.duration || ''}</span>
-            <button onclick="removeFromQueue(${realIdx}, event)" class="p-1 text-gray-500 hover:text-red-400 rounded-lg hover:bg-white/10 transition" title="Remove from queue">
+            <span class="text-gray-500 font-mono text-[10px]">${item.duration || ''}</span>
+            <button onclick="removeFromQueue(${item._realIdx}, event)" class="p-1 text-gray-500 hover:text-red-400 rounded-lg hover:bg-white/10 transition" title="Remove from queue">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
           </div>
         `;
-        container.appendChild(row);
-      });
+        return row;
+      }
+
+      // Helper to render a radio recommendation item row
+      function createRadioItemRow(item) {
+        const row = document.createElement('div');
+        row.className = "flex items-center justify-between p-2 rounded-xl bg-white/[0.03] hover:bg-white/10 active:scale-[0.99] transition cursor-pointer text-xs group";
+        row.onclick = () => {
+          queueIndex = item._realIdx;
+          loadAndPlayTrack(item);
+        };
+        row.innerHTML = `
+          <div class="flex items-center gap-2.5 min-w-0 flex-1">
+            <img src="${item.thumbnail}" class="w-8 h-8 rounded-lg object-cover bg-black/40 shrink-0" alt="art" onerror="this.src='https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&q=80'">
+            <div class="min-w-0 flex-1">
+              <div class="font-medium text-white line-clamp-1 flex items-center gap-1.5">
+                <span class="truncate">${item.title}</span>
+              </div>
+              <div class="text-[11px] text-gray-400 line-clamp-1">${item.artist}</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-1 pl-2">
+            <span class="text-gray-500 font-mono text-[10px] mr-1">${item.duration || ''}</span>
+            <button onclick="event.stopPropagation(); playTrackNext(${escapeTrackObj(item)})" class="p-1 text-indigo-400 hover:text-indigo-200 rounded-lg hover:bg-indigo-500/20 transition flex items-center gap-0.5 text-[10px] font-medium" title="Play next">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            </button>
+          </div>
+        `;
+        return row;
+      }
+
+      // -------------------------------------------------------------
+      // Section 2: User Queued Songs (if any)
+      // -------------------------------------------------------------
+      const restOfUserQueued = userQueued.filter(t => !nextTrack || t.id !== nextTrack.id);
+      if (restOfUserQueued.length > 0) {
+        const userHeader = document.createElement('div');
+        userHeader.className = "text-[11px] font-semibold text-purple-400 uppercase tracking-wider mt-3 mb-1.5 flex items-center justify-between";
+        userHeader.innerHTML = `<span>Queue (${restOfUserQueued.length})</span>`;
+        fragment.appendChild(userHeader);
+
+        restOfUserQueued.forEach(item => {
+          fragment.appendChild(createTrackRow(item));
+        });
+      }
+
+      // -------------------------------------------------------------
+      // Section 3: Remaining from Active Playlist / Library (if more than 1)
+      // -------------------------------------------------------------
+      const restOfPlaylist = playlistUpcoming.filter(t => !nextTrack || t.id !== nextTrack.id);
+      if (restOfPlaylist.length > 0) {
+        const plHeader = document.createElement('div');
+        plHeader.className = "text-[11px] font-semibold text-gray-400 uppercase tracking-wider mt-3 mb-1.5 flex items-center justify-between";
+        const plLabel = (activePlaylistId === 'user_pl_offline_downloads') ? 'Downloaded Songs' : 'Playlist';
+        plHeader.innerHTML = `<span>Upcoming in ${plLabel} (${restOfPlaylist.length})</span>`;
+        fragment.appendChild(plHeader);
+
+        restOfPlaylist.slice(0, 15).forEach(item => {
+          fragment.appendChild(createTrackRow(item));
+        });
+      }
+
+      // -------------------------------------------------------------
+      // Section 4: Radio & Similar Songs (Continuous Recommendations)
+      // -------------------------------------------------------------
+      const restOfRadio = radioUpcoming.filter(t => !nextTrack || t.id !== nextTrack.id);
+      if (restOfRadio.length > 0) {
+        const radioHeader = document.createElement('div');
+        radioHeader.className = "text-[11px] font-semibold text-amber-400/90 uppercase tracking-wider mt-4 mb-2 flex items-center justify-between";
+        radioHeader.innerHTML = `
+          <span class="flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5 text-amber-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            <span>Radio • Similar Tracks</span>
+          </span>
+          <span class="text-[10px] text-gray-500 font-mono font-normal">Autoplay on</span>
+        `;
+        fragment.appendChild(radioHeader);
+
+        restOfRadio.slice(0, 25).forEach(item => {
+          fragment.appendChild(createRadioItemRow(item));
+        });
+      } else if (!navigator.onLine) {
+        const offNote = document.createElement('div');
+        offNote.className = "py-4 text-center text-gray-500 text-[11px]";
+        offNote.innerHTML = "⚡ Offline: Radio recommendations unavailable. Playing songs saved on this device.";
+        fragment.appendChild(offNote);
+      }
+
+      container.appendChild(fragment);
     }
 
     function setupMediaSession() {
