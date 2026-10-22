@@ -54,6 +54,15 @@ class FavoriteRequest(BaseModel):
     thumbnail: Optional[str] = ""
     album: Optional[str] = ""
 
+class LibraryTrackRequest(BaseModel):
+    id: str
+    title: str
+    artist: Optional[str] = ""
+    duration: Optional[str] = ""
+    thumbnail: Optional[str] = ""
+    album: Optional[str] = ""
+    source: Optional[str] = "download"
+
 app = FastAPI(title="Spoti")
 
 # Initialize SQLite database
@@ -540,6 +549,42 @@ def check_favorite(track_id: str, authorization: Optional[str] = Header(None)):
 
 
 # -------------------------------------------------------------
+# User Library / Central Downloaded & Saved Tracks Endpoints
+# -------------------------------------------------------------
+@app.get("/api/library/tracks")
+def get_user_library(authorization: Optional[str] = Header(None)):
+    """Returns all tracks in user's central library from PocketBase."""
+    user = get_current_user(authorization)
+    tracks = playlist_manager.get_user_library_tracks(user["uid"])
+    return {"tracks": tracks, "count": len(tracks)}
+
+
+@app.post("/api/library/tracks")
+def add_user_library_track(track: LibraryTrackRequest, authorization: Optional[str] = Header(None)):
+    """Adds a track to user's central library in PocketBase."""
+    user = get_current_user(authorization)
+    success = playlist_manager.add_track_to_library(user["uid"], track.dict())
+    return {"success": success}
+
+
+@app.delete("/api/library/tracks/{track_id}")
+def remove_user_library_track(track_id: str, authorization: Optional[str] = Header(None)):
+    """Removes a track from user's central library in PocketBase."""
+    user = get_current_user(authorization)
+    success = playlist_manager.remove_track_from_library(user["uid"], track_id)
+    return {"success": success}
+
+
+@app.get("/api/library/check/{track_id}")
+def check_user_library_track(track_id: str, authorization: Optional[str] = Header(None)):
+    """Checks if a track is in user's central library."""
+    user = get_current_user_optional(authorization)
+    if not user:
+        return {"saved": False}
+    return {"saved": playlist_manager.is_track_in_library(user["uid"], track_id)}
+
+
+# -------------------------------------------------------------
 # Audio Playback, Radio & Download Endpoints
 # -------------------------------------------------------------
 @app.get("/api/radio/{video_id}")
@@ -562,12 +607,13 @@ def get_stream(video_id: str):
 @app.api_route("/api/download/stream/{video_id}", methods=["GET", "HEAD"])
 def stream_download_proxy(video_id: str, request: Request):
     """
-    Direct streaming proxy that pipes audio chunks directly from Google CDN / YouTube
-    to the client phone without storing to iPhone 7 disk or re-encoding with FFmpeg.
+    High-performance audio streaming endpoint.
+    1. Serves directly from server SSD cache (/var/mobile/server/data/music_cache) if present (<10ms).
+    2. Streams from upstream Google CDN while simultaneously caching to server disk for future multi-device play.
     """
     try:
-        # Check if local file exists first (e.g. from legacy library)
-        local_path = stream_downloader.get_local_track_path(video_id)
+        # Check if local cached audio exists first
+        local_path = stream_downloader.get_cached_audio_path(video_id)
         if local_path and os.path.isfile(local_path):
             filename = os.path.basename(local_path)
             media_type = "audio/mpeg" if local_path.endswith(".mp3") else "audio/mp4"
@@ -602,12 +648,51 @@ def stream_download_proxy(video_id: str, request: Request):
             req.close()
             return Response(status_code=200, headers=headers, media_type=content_type)
 
+        part_path = os.path.join(stream_downloader.CACHE_DIR, f".part_{video_id}.m4a")
+        final_path = os.path.join(stream_downloader.CACHE_DIR, f"{video_id}.m4a")
+
         def iter_chunks():
+            f = None
+            total_written = 0
             try:
+                try:
+                    f = open(part_path, "wb")
+                except Exception:
+                    f = None
                 for chunk in req.iter_content(chunk_size=65536):
                     if chunk:
+                        if f:
+                            try:
+                                f.write(chunk)
+                                total_written += len(chunk)
+                            except Exception:
+                                pass
                         yield chunk
+                if f:
+                    f.close()
+                    f = None
+                    if total_written > 100000:
+                        try:
+                            os.replace(part_path, final_path)
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            if os.path.exists(part_path):
+                                os.remove(part_path)
+                        except Exception:
+                            pass
             finally:
+                if f:
+                    try:
+                        f.close()
+                    except Exception:
+                        pass
+                if os.path.exists(part_path) and not os.path.exists(final_path):
+                    try:
+                        os.remove(part_path)
+                    except Exception:
+                        pass
                 req.close()
 
         return StreamingResponse(

@@ -2019,8 +2019,91 @@
       }
     }
 
+    // -------------------------------------------------------------
+    // Central Library Sync Engine (PocketBase user_library)
+    // -------------------------------------------------------------
+    function getPendingLibraryOps() {
+      try {
+        return JSON.parse(localStorage.getItem('spoti_pending_lib_ops') || '[]');
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function savePendingLibraryOps(ops) {
+      try {
+        localStorage.setItem('spoti_pending_lib_ops', JSON.stringify(ops));
+      } catch (e) {}
+    }
+
+    function queueLibraryOp(op) {
+      const ops = getPendingLibraryOps();
+      ops.push(op);
+      savePendingLibraryOps(ops);
+    }
+
+    async function syncSingleTrackToLibrary(track) {
+      if (!track || !track.id) return;
+      const token = localStorage.getItem('spoti_token');
+      if (navigator.onLine && token) {
+        try {
+          await authFetch('/api/library/tracks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: track.id,
+              title: track.title || 'Unknown Title',
+              artist: track.artist || '',
+              duration: track.duration || '--:--',
+              thumbnail: track.thumbnail || '',
+              album: track.album || '',
+              source: track.source || 'download'
+            })
+          });
+        } catch (e) {
+          queueLibraryOp({ op: 'add_library_track', track: track });
+        }
+      } else {
+        queueLibraryOp({ op: 'add_library_track', track: track });
+      }
+    }
+
+    async function syncPendingLibraryOps() {
+      if (!navigator.onLine || !localStorage.getItem('spoti_token')) return;
+      const ops = getPendingLibraryOps();
+      if (!ops || ops.length === 0) return;
+
+      const remainingOps = [];
+      for (const op of ops) {
+        try {
+          if (op.op === 'add_library_track' && op.track) {
+            const res = await authFetch('/api/library/tracks', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: op.track.id,
+                title: op.track.title || 'Unknown Title',
+                artist: op.track.artist || '',
+                duration: op.track.duration || '--:--',
+                thumbnail: op.track.thumbnail || '',
+                album: op.track.album || '',
+                source: op.track.source || 'download'
+              })
+            });
+            if (!res.ok && res.status !== 409) {
+              remainingOps.push(op);
+            }
+          }
+        } catch (e) {
+          remainingOps.push(op);
+        }
+      }
+      savePendingLibraryOps(remainingOps);
+    }
+
     window.addEventListener('online', () => {
       syncPendingPlaylistOps();
+      syncPendingLibraryOps();
     });
 
     async function initAuth() {
@@ -2244,6 +2327,17 @@
           }
         } catch (mErr) {
           console.warn("Guest playlist migration error:", mErr);
+        }
+
+        // Migrate any local offline tracks in SpotiDB to user's central PocketBase library
+        try {
+          const localTracks = await SpotiDB.getAllTracks();
+          for (const lt of localTracks) {
+            syncSingleTrackToLibrary(lt);
+          }
+          await syncPendingLibraryOps();
+        } catch (libErr) {
+          console.warn("Library migration on login error:", libErr);
         }
 
         closeAuthModal();
@@ -2560,9 +2654,17 @@
         let thumbMarkup = '';
 
         if (pl.is_offline_playlist) {
-          badgeText = `${offlineCount} on device`;
-          descText = `${offlineCount} songs saved on this device (offline)`;
-          const firstThumb = (offlineTracks.length > 0 && offlineTracks[0].thumbnail) ? offlineTracks[0].thumbnail : '';
+          const totalSyncedCount = pl.track_count || 0;
+          if (totalSyncedCount > 0 && totalSyncedCount !== offlineCount) {
+            badgeText = `${totalSyncedCount} synced • ${offlineCount} on device`;
+            descText = `${totalSyncedCount} songs in library (${offlineCount} saved on this device)`;
+          } else {
+            badgeText = `${offlineCount} on device`;
+            descText = `${offlineCount} songs saved on this device (offline)`;
+          }
+          const firstThumb = (offlineTracks.length > 0 && offlineTracks[0].thumbnail) 
+            ? offlineTracks[0].thumbnail 
+            : (pl.thumbnail && !pl.thumbnail.includes('unsplash') ? pl.thumbnail : '');
           if (firstThumb) {
             thumbMarkup = `
               <img src="${firstThumb}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">
@@ -2861,6 +2963,17 @@
         });
       }
 
+      // Sync to central user library in PocketBase
+      syncSingleTrackToLibrary({
+        id: ytId || t.id,
+        title: t.title,
+        artist: t.artist,
+        duration: t.duration || '',
+        thumbnail: t.thumbnail || '',
+        album: t.album || '',
+        source: 'download'
+      });
+
       downloadSingleTrack(t.id, t.title, t.artist, t.thumbnail, originalId);
       trackPendingAddToPlaylist = null;
     }
@@ -2994,7 +3107,18 @@
           queuePlaylistOp({ op: 'add_track', playlistId: playlistId, track: track });
         }
 
-        // 3. Start device IndexedDB download simultaneously if not downloaded
+        // 3. Sync to central user library in PocketBase
+        syncSingleTrackToLibrary({
+          id: ytId || track.id,
+          title: track.title,
+          artist: track.artist,
+          duration: track.duration || '',
+          thumbnail: track.thumbnail || '',
+          album: track.album || '',
+          source: 'playlist'
+        });
+
+        // 4. Start device IndexedDB download simultaneously if not downloaded
         downloadSingleTrack(track.id, track.title, track.artist, track.thumbnail, originalId);
         trackPendingAddToPlaylist = null;
         showToast(`✓ Added to ${playlistName}${navigator.onLine ? '' : ' (Offline)'}`);
@@ -3641,13 +3765,64 @@
         deleteBtn.classList.add('hidden');
       }
 
-      // Handle Device-Stored Offline Songs Playlist
+      // Handle Synced Library & Device-Stored Offline Songs Playlist
       if (playlistId === 'user_pl_offline_downloads') {
         const offlineTracks = await SpotiDB.getAllTracks();
+        const offlineMap = new Map();
+        offlineTracks.forEach(t => offlineMap.set(t.id, t));
+
+        let serverTracks = [];
+        if (navigator.onLine && localStorage.getItem('spoti_token')) {
+          try {
+            const res = await authFetch('/api/library/tracks');
+            if (res.ok) {
+              const data = await res.json();
+              serverTracks = data.tracks || [];
+            }
+          } catch (e) {
+            console.warn("Could not fetch server library tracks:", e);
+          }
+        }
+
+        const mergedTracks = [];
+        const seenIds = new Set();
+
+        for (const st of serverTracks) {
+          seenIds.add(st.id);
+          const local = offlineMap.get(st.id);
+          mergedTracks.push({
+            ...st,
+            isOnDevice: !!local,
+            blob: local ? local.blob : null,
+            sizeFormatted: local ? local.sizeFormatted : null
+          });
+        }
+
+        for (const ot of offlineTracks) {
+          if (!seenIds.has(ot.id)) {
+            seenIds.add(ot.id);
+            mergedTracks.push({
+              ...ot,
+              isOnDevice: true,
+              blob: ot.blob,
+              sizeFormatted: ot.sizeFormatted
+            });
+            if (navigator.onLine && localStorage.getItem('spoti_token')) {
+              syncSingleTrackToLibrary(ot);
+            }
+          }
+        }
+
+        const onDeviceCount = mergedTracks.filter(t => t.isOnDevice).length;
         document.getElementById('pl-title').innerText = "Downloaded Songs";
-        document.getElementById('pl-desc').innerText = `${offlineTracks.length} tracks saved on this device (offline)`;
+        if (mergedTracks.length === onDeviceCount) {
+          document.getElementById('pl-desc').innerText = `${mergedTracks.length} tracks saved on this device (offline)`;
+        } else {
+          document.getElementById('pl-desc').innerText = `${mergedTracks.length} tracks in synced library (${onDeviceCount} saved on this device)`;
+        }
+
         const coverEl = document.getElementById('pl-cover');
-        const firstThumb = (offlineTracks.length > 0 && offlineTracks[0].thumbnail) ? offlineTracks[0].thumbnail : '';
+        const firstThumb = (mergedTracks.length > 0 && mergedTracks[0].thumbnail) ? mergedTracks[0].thumbnail : '';
         if (firstThumb) {
           coverEl.src = firstThumb;
           coverEl.style.display = 'block';
@@ -3658,15 +3833,23 @@
         }
 
         trackList.innerHTML = '';
-        if (offlineTracks.length === 0) {
-          trackList.innerHTML = '<div class="text-center py-12 text-gray-500 text-xs">No songs downloaded on this device yet.<br><span class="text-gray-600 block mt-1">Tap ⬇️ on any song to save it directly to your phone.</span></div>';
+        if (mergedTracks.length === 0) {
+          trackList.innerHTML = '<div class="text-center py-12 text-gray-500 text-xs">No songs in your library yet.<br><span class="text-gray-600 block mt-1">Tap ⬇️ on any song to save it across all your devices.</span></div>';
           return;
         }
 
-        offlineTracks.forEach((t, i) => {
+        mergedTracks.forEach((t, i) => {
           const row = document.createElement('div');
           row.className = "glass-card p-2.5 rounded-xl flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer";
-          row.onclick = () => playTrackFromList(t, offlineTracks);
+          row.onclick = () => playTrackFromList(t, mergedTracks);
+
+          let badgeMarkup = '';
+          if (t.isOnDevice) {
+            badgeMarkup = `<span class="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 font-medium">✓ On Device</span>`;
+          } else {
+            badgeMarkup = `<button onclick="event.stopPropagation(); downloadSingleTrack('${t.id}', '${escapeQuotes(t.title)}', '${escapeQuotes(t.artist || '')}', '${escapeQuotes(t.thumbnail || '')}')" class="text-[10px] text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 px-2 py-0.5 rounded border border-indigo-500/20 font-medium flex items-center gap-1 transition">⬇️ Save Offline</button>`;
+          }
+
           row.innerHTML = `
             <span class="text-xs font-mono text-gray-500 w-4">${i + 1}</span>
             <div class="relative w-10 h-10 rounded-lg overflow-hidden bg-white/5 shrink-0 flex items-center justify-center">
@@ -3677,7 +3860,11 @@
             </div>
             <div class="min-w-0 flex-1">
               <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${t.title}</span>${renderEqIndicatorHtml(t.id, t.title)}</div>
-              <div class="text-xs text-gray-400 line-clamp-1">${t.artist} • ${t.sizeFormatted || 'Offline'}</div>
+              <div class="text-xs text-gray-400 line-clamp-1 flex items-center gap-2 mt-0.5">
+                <span class="truncate max-w-[120px]">${t.artist || 'Unknown'}</span>
+                <span>•</span>
+                ${badgeMarkup}
+              </div>
             </div>
             <div class="flex items-center gap-1">
               <!-- Add to Playlist -->
@@ -3685,8 +3872,8 @@
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
               </button>
               ${renderContextMenuBtnHtml(t)}
-              <!-- Delete from Device -->
-              <button onclick="event.stopPropagation(); deleteOfflineTrack('${t.id}', '${escapeQuotes(t.title)}')" class="p-2 text-red-400 hover:text-red-300 active:scale-95 transition" title="Delete from Device">
+              <!-- Delete from Library -->
+              <button onclick="event.stopPropagation(); deleteOfflineTrack('${t.id}', '${escapeQuotes(t.title)}')" class="p-2 text-red-400 hover:text-red-300 active:scale-95 transition" title="Delete Track">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
               </button>
             </div>
@@ -3837,8 +4024,32 @@
       btn.innerText = 'Queuing...';
       try {
         if (activePlaylistId === 'user_pl_offline_downloads') {
-          showToast("These tracks are already saved on your phone!");
-          btn.innerText = '⬇️ Download All';
+          let tracks = [];
+          if (navigator.onLine && localStorage.getItem('spoti_token')) {
+            try {
+              const res = await authFetch('/api/library/tracks');
+              if (res.ok) {
+                const data = await res.json();
+                tracks = data.tracks || [];
+              }
+            } catch (e) {}
+          }
+          let count = 0;
+          for (const t of tracks) {
+            const exists = await SpotiDB.getTrack(t.id);
+            if (!exists) {
+              await downloadSingleTrack(t.id, t.title, t.artist, t.thumbnail);
+              count++;
+            }
+          }
+          if (count === 0) {
+            showToast("All library tracks are already saved on this device!");
+            btn.innerText = '✓ All Synced';
+          } else {
+            showToast(`Downloaded ${count} tracks to this device!`);
+            btn.innerText = `✓ Synced ${count}`;
+          }
+          setTimeout(() => { btn.innerText = '⬇️ Download All'; }, 3000);
           return;
         }
         let tracks = [];
@@ -4619,6 +4830,17 @@
           offlineTrackIdSet.add(originalId);
         }
 
+        // Sync track to central PocketBase library
+        syncSingleTrackToLibrary({
+          id: id,
+          title: trackRecord.title,
+          artist: trackRecord.artist,
+          duration: trackRecord.duration,
+          thumbnail: trackRecord.thumbnail,
+          album: trackRecord.album,
+          source: 'download'
+        });
+
         // Morph ring into completed green checkmark
         updateDownloadProgressUI(id, 100, 'completed', originalId);
 
@@ -4653,10 +4875,15 @@
     }
 
     async function deleteOfflineTrack(id, title) {
-      if (confirm(`Remove "${title}" from this device's offline storage?`)) {
+      if (confirm(`Remove "${title}" from your saved library?`)) {
         await SpotiDB.deleteTrack(id);
+        if (navigator.onLine && localStorage.getItem('spoti_token')) {
+          try {
+            await authFetch(`/api/library/tracks/${id}`, { method: 'DELETE' });
+          } catch (e) {}
+        }
         await refreshOfflineTrackIds();
-        showToast(`🗑️ Removed "${title}" from this device`);
+        showToast(`🗑️ Removed "${title}" from library`);
         const drawerDlBtn = document.getElementById('drawer-download-btn');
         if (drawerDlBtn && currentTrack && currentTrack.id === id) {
           drawerDlBtn.classList.remove('hidden');
@@ -4668,6 +4895,7 @@
         loadUserPlaylists();
       }
     }
+    const deleteLibraryTrack = deleteOfflineTrack;
 
     function showToast(msg) {
       const toast = document.createElement('div');

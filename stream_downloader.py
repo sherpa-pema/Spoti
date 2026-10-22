@@ -12,6 +12,13 @@ if PROJECT_DIR not in sys.path:
 MUSIC_DIR = os.path.join(PROJECT_DIR, "music_library")
 os.makedirs(MUSIC_DIR, exist_ok=True)
 
+SERVER_CACHE_DIR = "/var/mobile/server/data/music_cache"
+if os.path.exists("/var/mobile/server/data"):
+    CACHE_DIR = SERVER_CACHE_DIR
+else:
+    CACHE_DIR = os.path.join(PROJECT_DIR, "music_cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
+
 TRANSIENT_DIR = "/tmp/spoti_transient"
 os.makedirs(TRANSIENT_DIR, exist_ok=True)
 
@@ -32,8 +39,34 @@ def get_safe_filename(name: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "", name).strip()
 
 
+def get_cached_audio_path(video_id: str) -> Optional[str]:
+    """Finds a cached audio file in CACHE_DIR, TRANSIENT_DIR, or MUSIC_DIR."""
+    for search_dir in (CACHE_DIR, TRANSIENT_DIR, MUSIC_DIR):
+        if os.path.isdir(search_dir):
+            for fname in os.listdir(search_dir):
+                if fname.startswith(".part_"):
+                    continue
+                if fname in (f"{video_id}.m4a", f"{video_id}.mp3", f"{video_id}.webm", f"{video_id}.opus"):
+                    fpath = os.path.join(search_dir, fname)
+                    if os.path.isfile(fpath) and os.path.getsize(fpath) > 10000:
+                        return fpath
+                if f"[{video_id}].mp3" in fname or f"[{video_id}].m4a" in fname:
+                    fpath = os.path.join(search_dir, fname)
+                    if os.path.isfile(fpath) and os.path.getsize(fpath) > 10000:
+                        return fpath
+    return None
+
+
 def get_cached_or_local_stream(video_id: str) -> Dict[str, Any]:
     """Fetches direct stream URL with caching."""
+    # 1. Fast path: check if audio is already cached on server storage
+    cached_path = get_cached_audio_path(video_id)
+    if cached_path:
+        return {
+            "source": "cache",
+            "url": f"/api/download/stream/{video_id}",
+        }
+
     now = time.time()
     with _STREAM_CACHE_LOCK:
         if video_id in _STREAM_CACHE:
@@ -81,13 +114,8 @@ def get_cached_or_local_stream(video_id: str) -> Dict[str, Any]:
 
 
 def get_local_track_path(video_id: str) -> Optional[str]:
-    """Finds an existing downloaded MP3 file in legacy MUSIC_DIR or TRANSIENT_DIR."""
-    for search_dir in (TRANSIENT_DIR, MUSIC_DIR):
-        if os.path.isdir(search_dir):
-            for fname in os.listdir(search_dir):
-                if f"[{video_id}].mp3" in fname or f"[{video_id}].m4a" in fname:
-                    return os.path.join(search_dir, fname)
-    return None
+    """Finds an existing downloaded audio file in CACHE_DIR, MUSIC_DIR, or TRANSIENT_DIR."""
+    return get_cached_audio_path(video_id)
 
 
 def get_transient_track_path(video_id: str) -> Optional[str]:
@@ -227,12 +255,54 @@ def _download_worker(video_id: str, title: str, artist: str):
             DOWNLOAD_STATUS[video_id]["error"] = str(e)
 
 
+def prune_cache_if_needed(max_bytes: int = 25 * 1024 * 1024 * 1024):
+    """Safely prunes least-recently-modified files if cache exceeds 25 GB."""
+    if not os.path.isdir(CACHE_DIR):
+        return
+    try:
+        files = []
+        total_size = 0
+        now = time.time()
+        for fname in os.listdir(CACHE_DIR):
+            p = os.path.join(CACHE_DIR, fname)
+            if fname.startswith(".part_"):
+                # Clean up any abandoned part files older than 30 mins
+                if os.path.isfile(p) and (now - os.path.getmtime(p) > 1800):
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
+                continue
+            if os.path.isfile(p):
+                sz = os.path.getsize(p)
+                mtime = os.path.getmtime(p)
+                files.append((mtime, sz, p))
+                total_size += sz
+
+        if total_size > max_bytes:
+            # Sort oldest first
+            files.sort(key=lambda x: x[0])
+            for mtime, sz, fpath in files:
+                try:
+                    os.remove(fpath)
+                    total_size -= sz
+                    if total_size <= int(max_bytes * 0.85):
+                        break
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"Error during cache prune: {e}", file=sys.stderr)
+
+
 def _transient_janitor_loop():
-    """Background janitor that prunes any stale transient files older than 15 mins."""
+    """Background janitor that prunes stale transient files and enforces cache limits."""
+    loop_count = 0
     while True:
         try:
             time.sleep(180)
             now = time.time()
+            loop_count += 1
+
             if os.path.isdir(TRANSIENT_DIR):
                 for fname in os.listdir(TRANSIENT_DIR):
                     fpath = os.path.join(TRANSIENT_DIR, fname)
@@ -249,6 +319,10 @@ def _transient_janitor_loop():
                 ]
                 for vid in stale_keys:
                     DOWNLOAD_STATUS.pop(vid, None)
+
+            # Every 10 loops (~30 mins), enforce cache size limits
+            if loop_count % 10 == 0:
+                prune_cache_if_needed()
         except Exception:
             pass
 

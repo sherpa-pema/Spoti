@@ -21,16 +21,18 @@ def get_all_playlists(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Returns playlists accessible to the user (Personal + Liked + Shared Downloaded)."""
     result: List[Dict[str, Any]] = []
 
-    # 1. Always include Shared Downloaded Songs (stored client-side on device)
+    # 1. Include Downloaded / Synced Library Songs
     try:
+        lib_tracks = get_user_library_tracks(user_id) if user_id else []
+        lib_thumb = lib_tracks[0].get("thumbnail") if lib_tracks else "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80"
         result.append({
             "id": "user_pl_offline_downloads",
             "title": "Downloaded Songs",
-            "description": "Songs saved on this device (offline)",
+            "description": f"{len(lib_tracks)} songs in your synced library" if user_id else "Songs saved on this device (offline)",
             "created_at": 0,
-            "thumbnail": "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80",
-            "tracks": [],
-            "track_count": 0,
+            "thumbnail": lib_thumb,
+            "tracks": lib_tracks,
+            "track_count": len(lib_tracks),
             "is_offline_playlist": True,
             "is_system": True,
         })
@@ -121,15 +123,17 @@ def create_playlist(user_id: str, name: str, description: str = "") -> Dict[str,
 
 def get_playlist(playlist_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Returns a single playlist with all its tracks."""
-    # 1. Downloaded Songs (Stored client-side in device IndexedDB)
+    # 1. Downloaded / Saved Library Songs (Backed by PocketBase user_library when user is authenticated)
     if playlist_id == "user_pl_offline_downloads":
+        lib_tracks = get_user_library_tracks(user_id) if user_id else []
+        thumb = lib_tracks[0].get("thumbnail") if lib_tracks else "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80"
         return {
             "id": "user_pl_offline_downloads",
             "title": "Downloaded Songs",
-            "description": "Songs saved on this device (offline)",
-            "thumbnail": "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80",
-            "tracks": [],
-            "track_count": 0,
+            "description": f"{len(lib_tracks)} songs in your synced library" if user_id else "Songs saved on this device (offline)",
+            "thumbnail": thumb,
+            "tracks": lib_tracks,
+            "track_count": len(lib_tracks),
             "is_user_playlist": True,
             "is_offline_playlist": True,
             "is_system": True,
@@ -379,6 +383,101 @@ def is_track_liked(user_id: str, track_id: str) -> bool:
     admin_pb = database.get_admin_pb()
     try:
         existing = admin_pb.collection("user_favorites").get_list(
+            1, 1, query_params={"filter": f'user = "{user_id}" && track_id = "{track_id}"'}
+        )
+        return existing.total_items > 0
+    except Exception:
+        return False
+
+
+# -------------------------------------------------------------
+# User Library / Central Downloaded & Saved Tracks Sync
+# -------------------------------------------------------------
+def get_user_library_tracks(user_id: str) -> List[Dict[str, Any]]:
+    """Returns all tracks in user's central library from PocketBase."""
+    if not user_id:
+        return []
+
+    admin_pb = database.get_admin_pb()
+    try:
+        records = admin_pb.collection("user_library").get_full_list(
+            query_params={"filter": f'user = "{user_id}"', "sort": "-created"}
+        )
+        return [{
+            "id": r.track_id,
+            "track_id": r.track_id,
+            "title": r.title,
+            "artist": getattr(r, "artist", "") or "Unknown Artist",
+            "duration": getattr(r, "duration", "--:--") or "--:--",
+            "thumbnail": getattr(r, "thumbnail", "") or "",
+            "album": getattr(r, "album", "") or "",
+            "source": getattr(r, "source", "download") or "download",
+            "saved_at": getattr(r, "created", "")
+        } for r in records]
+    except Exception as e:
+        print(f"Error fetching user library from PocketBase: {e}", file=sys.stderr)
+        return []
+
+
+def add_track_to_library(user_id: str, track: Dict[str, Any]) -> bool:
+    """Adds a track to the user's central library in PocketBase."""
+    if not user_id:
+        return False
+
+    track_id = track.get("id") or track.get("track_id")
+    if not track_id:
+        return False
+
+    admin_pb = database.get_admin_pb()
+    try:
+        existing = admin_pb.collection("user_library").get_list(
+            1, 1, query_params={"filter": f'user = "{user_id}" && track_id = "{track_id}"'}
+        )
+        if existing.total_items > 0:
+            return True
+
+        admin_pb.collection("user_library").create({
+            "user": user_id,
+            "track_id": track_id,
+            "title": track.get("title", "Unknown Title"),
+            "artist": track.get("artist", "") or "",
+            "duration": track.get("duration", "--:--") or "--:--",
+            "thumbnail": track.get("thumbnail", "") or "",
+            "album": track.get("album", "") or "",
+            "source": track.get("source", "download") or "download"
+        })
+        return True
+    except Exception as e:
+        print(f"Error saving track {track_id} to user library in PocketBase: {e}", file=sys.stderr)
+        return False
+
+
+def remove_track_from_library(user_id: str, track_id: str) -> bool:
+    """Removes a track from the user's central library in PocketBase."""
+    if not user_id or not track_id:
+        return False
+
+    admin_pb = database.get_admin_pb()
+    try:
+        existing = admin_pb.collection("user_library").get_list(
+            1, 10, query_params={"filter": f'user = "{user_id}" && track_id = "{track_id}"'}
+        )
+        for item in existing.items:
+            admin_pb.collection("user_library").delete(item.id)
+        return True
+    except Exception as e:
+        print(f"Error removing track {track_id} from user library in PocketBase: {e}", file=sys.stderr)
+        return False
+
+
+def is_track_in_library(user_id: str, track_id: str) -> bool:
+    """Checks if a track is in the user's library in PocketBase."""
+    if not user_id or not track_id:
+        return False
+
+    admin_pb = database.get_admin_pb()
+    try:
+        existing = admin_pb.collection("user_library").get_list(
             1, 1, query_params={"filter": f'user = "{user_id}" && track_id = "{track_id}"'}
         )
         return existing.total_items > 0
