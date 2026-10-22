@@ -12,6 +12,17 @@ import library_manager
 from pocketbase.client import ClientResponseError
 
 
+def _clean_thumbnail(thumb: Any) -> str:
+    """Ensures thumbnail is a valid, safe URL and does not exceed PocketBase field limits."""
+    if not thumb or not isinstance(thumb, str):
+        return ""
+    clean = thumb.strip()
+    # Strip base64 data URIs and oversized strings to satisfy PocketBase 5000-char constraint
+    if clean.startswith("data:") or len(clean) > 4000:
+        return ""
+    return clean
+
+
 def _migrate_legacy_json(user_id: str):
     """Legacy migration no-op (data already migrated to PocketBase)."""
     pass
@@ -202,19 +213,21 @@ def get_playlist(playlist_id: str, user_id: Optional[str] = None) -> Optional[Di
 
 
 def add_track_to_playlist(playlist_id: str, track: Dict[str, Any], user_id: Optional[str] = None) -> bool:
-    """Adds a track to a playlist in PocketBase."""
+    """Adds a track to a playlist in PocketBase with strict ownership verification."""
+    if not user_id:
+        return False
+
     if playlist_id in ("user_pl_offline_downloads", "user_pl_liked_songs"):
-        if playlist_id == "user_pl_liked_songs" and user_id:
+        if playlist_id == "user_pl_liked_songs":
             return like_track(user_id, track)
         return False
 
     admin_pb = database.get_admin_pb()
     try:
-        # Verify ownership if user_id provided
-        if user_id:
-            pl = admin_pb.collection("playlists").get_one(playlist_id)
-            if pl.user != user_id:
-                return False
+        # Strictly verify ownership
+        pl = admin_pb.collection("playlists").get_one(playlist_id)
+        if getattr(pl, "user", None) != user_id:
+            return False
 
         track_id = track.get("id")
         if not track_id:
@@ -233,7 +246,7 @@ def add_track_to_playlist(playlist_id: str, track: Dict[str, Any], user_id: Opti
             "title": track.get("title", "Unknown Title"),
             "artist": track.get("artist", ""),
             "duration": track.get("duration", "--:--"),
-            "thumbnail": track.get("thumbnail", ""),
+            "thumbnail": _clean_thumbnail(track.get("thumbnail")),
             "album": track.get("album", "")
         })
         return True
@@ -243,7 +256,10 @@ def add_track_to_playlist(playlist_id: str, track: Dict[str, Any], user_id: Opti
 
 
 def remove_track_from_playlist(playlist_id: str, track_id: str, user_id: Optional[str] = None) -> bool:
-    """Removes a track from a playlist in PocketBase."""
+    """Removes a track from a playlist in PocketBase with strict ownership verification."""
+    if not user_id:
+        return False
+
     if playlist_id == "user_pl_offline_downloads":
         try:
             import stream_downloader
@@ -255,15 +271,15 @@ def remove_track_from_playlist(playlist_id: str, track_id: str, user_id: Optiona
             return False
         return False
 
-    if playlist_id == "user_pl_liked_songs" and user_id:
+    if playlist_id == "user_pl_liked_songs":
         return unlike_track(user_id, track_id)
 
     admin_pb = database.get_admin_pb()
     try:
-        if user_id:
-            pl = admin_pb.collection("playlists").get_one(playlist_id)
-            if pl.user != user_id:
-                return False
+        # Strictly verify ownership
+        pl = admin_pb.collection("playlists").get_one(playlist_id)
+        if getattr(pl, "user", None) != user_id:
+            return False
 
         existing = admin_pb.collection("playlist_tracks").get_list(
             1, 1, query_params={"filter": f'playlist = "{playlist_id}" && track_id = "{track_id}"'}
@@ -348,7 +364,7 @@ def like_track(user_id: str, track: Dict[str, Any]) -> bool:
             "title": track.get("title", "Unknown Title"),
             "artist": track.get("artist", ""),
             "duration": track.get("duration", "--:--"),
-            "thumbnail": track.get("thumbnail", ""),
+            "thumbnail": _clean_thumbnail(track.get("thumbnail")),
             "album": track.get("album", "")
         })
         return True
@@ -442,7 +458,7 @@ def add_track_to_library(user_id: str, track: Dict[str, Any]) -> bool:
             "title": track.get("title", "Unknown Title"),
             "artist": track.get("artist", "") or "",
             "duration": track.get("duration", "--:--") or "--:--",
-            "thumbnail": track.get("thumbnail", "") or "",
+            "thumbnail": _clean_thumbnail(track.get("thumbnail")),
             "album": track.get("album", "") or "",
             "source": track.get("source", "download") or "download"
         })

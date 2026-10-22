@@ -1,4 +1,4 @@
-const CACHE_NAME = 'spoti-offline-v22';
+const CACHE_NAME = 'spoti-offline-v23';
 const SHELL_ASSETS = [
   '/',
   '/static/manifest.json',
@@ -35,11 +35,10 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // 1. Never cache streaming audio or downloads
+  // 1. Bypass Service Worker entirely for non-GET methods, all API endpoints, and streaming media
   if (
-    url.pathname.startsWith('/api/stream') ||
-    url.pathname.startsWith('/api/download') ||
-    url.pathname.startsWith('/api/library/file') ||
+    event.request.method !== 'GET' ||
+    url.pathname.startsWith('/api/') ||
     url.hostname.includes('googlevideo.com')
   ) {
     return;

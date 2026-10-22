@@ -2,6 +2,7 @@ import os
 import sys
 import re
 import time
+import shutil
 import threading
 from typing import Dict, Any, Optional
 
@@ -23,7 +24,18 @@ TRANSIENT_DIR = "/tmp/spoti_transient"
 os.makedirs(TRANSIENT_DIR, exist_ok=True)
 
 import yt_dlp
-from downloader import find_ffmpeg
+
+
+def find_ffmpeg() -> Optional[str]:
+    """Finds ffmpeg executable in PATH or standard iOS/macOS/Linux directories."""
+    ffmpeg_in_path = shutil.which("ffmpeg")
+    if ffmpeg_in_path:
+        return os.path.dirname(ffmpeg_in_path)
+    for cand_dir in ["/var/jb/usr/bin", "/usr/local/bin", "/usr/bin", "/var/mobile/server/bin", os.path.join(PROJECT_DIR, "bin")]:
+        cand_bin = os.path.join(cand_dir, "ffmpeg")
+        if os.path.isfile(cand_bin) and os.access(cand_bin, os.X_OK):
+            return cand_dir
+    return None
 
 # In-memory stream URL cache (video_id -> {'url': str, 'expires_at': float})
 _STREAM_CACHE: Dict[str, Dict[str, Any]] = {}

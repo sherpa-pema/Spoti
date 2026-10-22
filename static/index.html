@@ -845,6 +845,34 @@
 
   <!-- Application Logic -->
   <script>
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function escapeQuotes(str) {
+      if (!str) return '';
+      return String(str).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    }
+
+    function escapeTrackObj(t) {
+      if (!t) return '{}';
+      const copy = {
+        id: t.id,
+        title: t.title || '',
+        artist: t.artist || '',
+        duration: t.duration || '',
+        thumbnail: t.thumbnail || '',
+        album: t.album || ''
+      };
+      return JSON.stringify(copy).replace(/"/g, '&quot;');
+    }
+
     const audio = document.getElementById('audio-engine');
     const preloadAudio = document.getElementById('spoti-preload-engine');
     let currentTrack = null;
@@ -1175,6 +1203,12 @@
 
       currentLyricsData = result;
       try {
+        const lyricKeys = Object.keys(localStorage).filter(k => k.startsWith('spoti_lyrics_'));
+        if (lyricKeys.length > 30) {
+          for (let i = 0; i < lyricKeys.length - 25; i++) {
+            localStorage.removeItem(lyricKeys[i]);
+          }
+        }
         localStorage.setItem('spoti_lyrics_' + track.id, JSON.stringify(result));
       } catch (e) {}
 
@@ -1721,15 +1755,71 @@
         } catch (e) {
           return 0;
         }
+      },
+
+      async getAllTrackIds() {
+        try {
+          const db = await this.open();
+          return new Promise((resolve) => {
+            const tx = db.transaction('tracks', 'readonly');
+            const store = tx.objectStore('tracks');
+            const req = store.getAllKeys();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => resolve([]);
+          });
+        } catch (e) {
+          return [];
+        }
+      },
+
+      async getTracksMetadata() {
+        try {
+          const db = await this.open();
+          return new Promise((resolve) => {
+            const tx = db.transaction('tracks', 'readonly');
+            const store = tx.objectStore('tracks');
+            const req = store.openCursor();
+            const results = [];
+            req.onsuccess = (e) => {
+              const cursor = e.target.result;
+              if (cursor) {
+                const val = cursor.value;
+                // Exclude binary audio blob from memory heap
+                results.push({
+                  id: val.id,
+                  original_id: val.original_id || val.id,
+                  title: val.title || 'Unknown Title',
+                  artist: val.artist || 'Unknown Artist',
+                  duration: val.duration || '--:--',
+                  thumbnail: val.thumbnail || '',
+                  album: val.album || '',
+                  sizeBytes: val.sizeBytes || 0,
+                  sizeFormatted: val.sizeFormatted || '',
+                  savedAt: val.savedAt || 0,
+                  is_offline: true,
+                  isOnDevice: true
+                });
+                cursor.continue();
+              } else {
+                results.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+                resolve(results);
+              }
+            };
+            req.onerror = () => resolve([]);
+          });
+        } catch (e) {
+          return [];
+        }
       }
     };
 
     async function refreshOfflineTrackIds() {
       try {
-        const tracks = await SpotiDB.getAllTracks();
-        offlineTrackIdSet = new Set(tracks.map(t => t.id));
+        const keys = await SpotiDB.getAllTrackIds();
+        offlineTrackIdSet = new Set(keys);
+        const count = await SpotiDB.count();
         const countEl = document.getElementById('offline-songs-count');
-        if (countEl) countEl.innerText = tracks.length;
+        if (countEl) countEl.innerText = count;
       } catch (e) {
         offlineTrackIdSet = new Set();
       }
@@ -2049,10 +2139,11 @@
 
     async function syncSingleTrackToLibrary(track) {
       if (!track || !track.id) return;
+      const safeThumb = (track.thumbnail && !track.thumbnail.startsWith('data:') && track.thumbnail.length < 4000) ? track.thumbnail : '';
       const token = localStorage.getItem('spoti_token');
       if (navigator.onLine && token) {
         try {
-          await authFetch('/api/library/tracks', {
+          const res = await authFetch('/api/library/tracks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2060,16 +2151,19 @@
               title: track.title || 'Unknown Title',
               artist: track.artist || '',
               duration: track.duration || '--:--',
-              thumbnail: track.thumbnail || '',
+              thumbnail: safeThumb,
               album: track.album || '',
               source: track.source || 'download'
             })
           });
+          if (!res.ok && res.status !== 400 && res.status !== 409) {
+            queueLibraryOp({ op: 'add_library_track', track: { ...track, thumbnail: safeThumb } });
+          }
         } catch (e) {
-          queueLibraryOp({ op: 'add_library_track', track: track });
+          queueLibraryOp({ op: 'add_library_track', track: { ...track, thumbnail: safeThumb } });
         }
       } else {
-        queueLibraryOp({ op: 'add_library_track', track: track });
+        queueLibraryOp({ op: 'add_library_track', track: { ...track, thumbnail: safeThumb } });
       }
     }
 
@@ -2082,6 +2176,7 @@
       for (const op of ops) {
         try {
           if (op.op === 'add_library_track' && op.track) {
+            const safeThumb = (op.track.thumbnail && !op.track.thumbnail.startsWith('data:') && op.track.thumbnail.length < 4000) ? op.track.thumbnail : '';
             const res = await authFetch('/api/library/tracks', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -2090,12 +2185,12 @@
                 title: op.track.title || 'Unknown Title',
                 artist: op.track.artist || '',
                 duration: op.track.duration || '--:--',
-                thumbnail: op.track.thumbnail || '',
+                thumbnail: safeThumb,
                 album: op.track.album || '',
                 source: op.track.source || 'download'
               })
             });
-            if (!res.ok && res.status !== 409) {
+            if (!res.ok && res.status !== 400 && res.status !== 409) {
               remainingOps.push(op);
             }
           }
@@ -2106,12 +2201,22 @@
       savePendingLibraryOps(remainingOps);
     }
 
-    window.addEventListener('online', () => {
-      syncPendingPlaylistOps();
-      syncPendingLibraryOps();
-    });
-
     async function initAuth() {
+      // Purge any historically malformed ops containing base64 data URIs
+      try {
+        const rawOps = localStorage.getItem('spoti_pending_library_ops');
+        if (rawOps) {
+          const ops = JSON.parse(rawOps);
+          const sanitized = ops.map(op => {
+            if (op.track && op.track.thumbnail && op.track.thumbnail.startsWith('data:')) {
+              op.track.thumbnail = '';
+            }
+            return op;
+          });
+          localStorage.setItem('spoti_pending_library_ops', JSON.stringify(sanitized));
+        }
+      } catch (e) {}
+
       const token = localStorage.getItem('spoti_token');
       const nameDisplay = document.getElementById('user-name-display');
       const dropdownUser = document.getElementById('dropdown-username');
@@ -2336,7 +2441,7 @@
 
         // Migrate any local offline tracks in SpotiDB to user's central PocketBase library
         try {
-          const localTracks = await SpotiDB.getAllTracks();
+          const localTracks = await SpotiDB.getTracksMetadata();
           for (const lt of localTracks) {
             syncSingleTrackToLibrary(lt);
           }
@@ -2527,6 +2632,9 @@
 
     window.addEventListener('online', () => {
       exitOfflineMode();
+      syncPendingPlaylistOps();
+      syncPendingLibraryOps();
+      refreshOfflineTrackIds();
     });
 
     // Prevent document-level scroll drift in iOS PWA standalone mode
@@ -2644,10 +2752,9 @@
       const plCountEl = document.getElementById('user-pl-count');
       if (plCountEl) plCountEl.innerText = customPlaylists.length;
 
-      const offlineTracks = await SpotiDB.getAllTracks();
+      const offlineCount = await SpotiDB.count();
       if (currentSeq !== playlistRenderSeq) return;
 
-      const offlineCount = offlineTracks.length;
       const offlineBadgeEl = document.getElementById('offline-songs-count');
       if (offlineBadgeEl) offlineBadgeEl.innerText = offlineCount;
 
@@ -2710,8 +2817,8 @@
             ${thumbMarkup}
           </div>
           <div class="min-w-0 flex-1">
-            <div class="text-sm font-semibold text-white line-clamp-1">${pl.title}</div>
-            <div class="text-xs text-indigo-400 line-clamp-1 mt-0.5">${badgeText}</div>
+            <div class="text-sm font-semibold text-white line-clamp-1">${escapeHtml(pl.title)}</div>
+            <div class="text-xs text-indigo-400 line-clamp-1 mt-0.5">${escapeHtml(badgeText)}</div>
           </div>
           <span class="text-xs text-gray-400 p-2">▶</span>
         `;
@@ -3038,7 +3145,7 @@
             </div>
           </div>
           <div class="min-w-0 flex-1">
-            <div class="text-xs font-semibold text-white line-clamp-1">${pl.title}</div>
+            <div class="text-xs font-semibold text-white line-clamp-1">${escapeHtml(pl.title)}</div>
             <div class="text-[11px] text-gray-400">${pl.track_count || 0} songs</div>
           </div>
           <span class="text-xs text-indigo-400 font-medium px-2 py-1 bg-white/5 rounded-lg flex items-center gap-1">
@@ -3312,9 +3419,9 @@
             </div>
           </div>
           <div class="min-w-0 flex-1">
-            <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${track.title}</span>${renderEqIndicatorHtml(track.id, track.title)}</div>
-            <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
-            <span class="inline-block mt-1 text-[9px] font-medium px-1.5 py-0.2 rounded bg-white/5 text-indigo-300">${track.source || 'Trending'}</span>
+            <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${escapeHtml(track.title)}</span>${renderEqIndicatorHtml(track.id, track.title)}</div>
+            <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${escapeHtml(track.artist)}</div>
+            <span class="inline-block mt-1 text-[9px] font-medium px-1.5 py-0.2 rounded bg-white/5 text-indigo-300">${escapeHtml(track.source || 'Trending')}</span>
           </div>
           <div class="flex items-center gap-1">
             ${renderDownloadBtnHtml(track)}
@@ -3367,9 +3474,9 @@
             </div>
           </div>
           <div class="min-w-0 flex-1">
-            <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${track.title}</span>${renderEqIndicatorHtml(track.id, track.title)}</div>
-            <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
-            ${track.weeks_on_chart ? `<span class="text-[10px] text-amber-300/80 mt-0.5 block font-mono">${track.weeks_on_chart} wks on chart</span>` : ''}
+            <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${escapeHtml(track.title)}</span>${renderEqIndicatorHtml(track.id, track.title)}</div>
+            <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${escapeHtml(track.artist)}</div>
+            ${track.weeks_on_chart ? `<span class="text-[10px] text-amber-300/80 mt-0.5 block font-mono">${escapeHtml(track.weeks_on_chart)} wks on chart</span>` : ''}
           </div>
           <div class="flex items-center gap-1">
             ${renderDownloadBtnHtml(track)}
@@ -3464,9 +3571,9 @@
                 </div>
               </div>
               <div class="min-w-0 flex-1">
-                <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${track.title}</span>${renderEqIndicatorHtml(track.id, track.title)}</div>
-                <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${track.artist}</div>
-                ${track.release_date ? `<span class="text-[10px] text-purple-300/80 mt-0.5 block font-mono">${track.release_date}</span>` : ''}
+                <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${escapeHtml(track.title)}</span>${renderEqIndicatorHtml(track.id, track.title)}</div>
+                <div class="text-xs text-gray-400 line-clamp-1 mt-0.5">${escapeHtml(track.artist)}</div>
+                ${track.release_date ? `<span class="text-[10px] text-purple-300/80 mt-0.5 block font-mono">${escapeHtml(track.release_date)}</span>` : ''}
               </div>
               <div class="flex items-center gap-1">
                 ${renderDownloadBtnHtml(track)}
@@ -3488,7 +3595,7 @@
               <img src="${g.picture}" class="absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition duration-500" alt="${g.name}" loading="lazy">
               <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent"></div>
               <span class="relative self-end text-[10px] font-semibold text-white/90 bg-white/20 backdrop-blur-md px-2 py-0.5 rounded-full">${(g.tracks || []).length} Hits</span>
-              <span class="relative text-sm font-bold text-white tracking-wide">${g.name}</span>
+              <span class="relative text-sm font-bold text-white tracking-wide">${escapeHtml(g.name)}</span>
             `;
             genresContainer.appendChild(card);
           });
@@ -3533,8 +3640,8 @@
             </div>
           </div>
           <div class="min-w-0 flex-1">
-            <div class="text-xs font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${t.title}</span>${renderEqIndicatorHtml(t.id, t.title)}</div>
-            <div class="text-[11px] text-gray-400 line-clamp-1">${t.artist}</div>
+            <div class="text-xs font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${escapeHtml(t.title)}</span>${renderEqIndicatorHtml(t.id, t.title)}</div>
+            <div class="text-[11px] text-gray-400 line-clamp-1">${escapeHtml(t.artist)}</div>
           </div>
           <span class="text-[11px] text-gray-400 font-mono px-1">${t.duration || ''}</span>
           <div class="flex items-center gap-1">
@@ -3711,8 +3818,8 @@
             row.innerHTML = `
               <img src="${item.thumbnail}" class="w-12 h-12 rounded-lg object-cover" alt="thumb">
               <div class="min-w-0 flex-1">
-                <div class="text-sm font-semibold text-white line-clamp-1">${item.title}</div>
-                <div class="text-xs text-gray-400 line-clamp-1">Playlist • ${item.artist}</div>
+                <div class="text-sm font-semibold text-white line-clamp-1">${escapeHtml(item.title)}</div>
+                <div class="text-xs text-gray-400 line-clamp-1">Playlist • ${escapeHtml(item.artist)}</div>
               </div>
               <span class="text-xs text-indigo-400 px-2.5 py-1 bg-white/5 rounded-lg">View</span>
             `;
@@ -3727,8 +3834,8 @@
                 </div>
               </div>
               <div class="min-w-0 flex-1">
-                <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${item.title}</span>${renderEqIndicatorHtml(item.id, item.title)}</div>
-                <div class="text-xs text-gray-400 line-clamp-1">${item.artist} • ${item.duration}</div>
+                <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${escapeHtml(item.title)}</span>${renderEqIndicatorHtml(item.id, item.title)}</div>
+                <div class="text-xs text-gray-400 line-clamp-1">${escapeHtml(item.artist)} • ${escapeHtml(item.duration)}</div>
               </div>
               <div class="flex items-center gap-1">
                 <!-- Like -->
@@ -3772,7 +3879,7 @@
 
       // Handle Synced Library & Device-Stored Offline Songs Playlist
       if (playlistId === 'user_pl_offline_downloads') {
-        const offlineTracks = await SpotiDB.getAllTracks();
+        const offlineTracks = await SpotiDB.getTracksMetadata();
         const offlineMap = new Map();
         offlineTracks.forEach(t => offlineMap.set(t.id, t));
 
@@ -3864,9 +3971,9 @@
               </div>
             </div>
             <div class="min-w-0 flex-1">
-              <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${t.title}</span>${renderEqIndicatorHtml(t.id, t.title)}</div>
+              <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${escapeHtml(t.title)}</span>${renderEqIndicatorHtml(t.id, t.title)}</div>
               <div class="text-xs text-gray-400 line-clamp-1 flex items-center gap-2 mt-0.5">
-                <span class="truncate max-w-[120px]">${t.artist || 'Unknown'}</span>
+                <span class="truncate max-w-[120px]">${escapeHtml(t.artist || 'Unknown')}</span>
                 <span>•</span>
                 ${badgeMarkup}
               </div>
@@ -3974,8 +4081,8 @@
             </div>
           </div>
           <div class="min-w-0 flex-1">
-            <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${t.title}</span>${renderEqIndicatorHtml(t.id, t.title)}</div>
-            <div class="text-xs text-gray-400 line-clamp-1">${t.artist || 'Unknown'}</div>
+            <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${escapeHtml(t.title)}</span>${renderEqIndicatorHtml(t.id, t.title)}</div>
+            <div class="text-xs text-gray-400 line-clamp-1">${escapeHtml(t.artist || 'Unknown')}</div>
           </div>
           <div class="flex items-center gap-1">
             ${actionButtonsHtml}
@@ -3989,7 +4096,7 @@
     async function playEntirePlaylist() {
       try {
         if (activePlaylistId === 'user_pl_offline_downloads') {
-          const offlineTracks = await SpotiDB.getAllTracks();
+          const offlineTracks = await SpotiDB.getTracksMetadata();
           if (offlineTracks.length > 0) {
             playTrackFromList(offlineTracks[0], offlineTracks, 'playlist', 'Downloaded Songs');
           }
@@ -4094,7 +4201,7 @@
       container.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Loading songs saved on device...</div>';
 
       try {
-        const tracks = await SpotiDB.getAllTracks();
+        const tracks = await SpotiDB.getTracksMetadata();
         if (currentSeq !== libraryRenderSeq) return;
 
         const countEl = document.getElementById('offline-songs-count');
@@ -4231,24 +4338,32 @@
       }, delayMs);
     }
 
+    let isPreloadingInFlight = false;
+    let lastPreloadedTrackId = null;
+
     async function preloadNextTrack() {
-      if (!navigator.onLine) return;
+      if (isPreloadingInFlight || !navigator.onLine) return;
       const next = peekNextTrack();
-      if (!next || !next.id) return;
+      if (!next || !next.id || next.id === lastPreloadedTrackId) return;
 
-      // 1. If already saved in phone IndexedDB, 0ms local playback is guaranteed
+      isPreloadingInFlight = true;
       try {
-        const offline = await SpotiDB.getTrack(next.id);
-        if (offline && offline.blob) return;
-      } catch (e) {}
+        // 1. If already saved in phone IndexedDB, 0ms local playback is guaranteed
+        try {
+          const offline = await SpotiDB.getTrack(next.id);
+          if (offline && offline.blob) {
+            lastPreloadedTrackId = next.id;
+            return;
+          }
+        } catch (e) {}
 
-      // 2. Check if already preloaded and fresh (< 2 hours)
-      const cached = preloadedTrackCache[next.id];
-      if (cached && cached.url && (Date.now() - cached.timestamp < 2 * 3600 * 1000)) {
-        return;
-      }
+        // 2. Check if already preloaded and fresh (< 2 hours)
+        const cached = preloadedTrackCache[next.id];
+        if (cached && cached.url && (Date.now() - cached.timestamp < 2 * 3600 * 1000)) {
+          lastPreloadedTrackId = next.id;
+          return;
+        }
 
-      try {
         // Resolve YouTube video ID if needed
         let targetId = next.id;
         if (typeof ensureTrackHasYtId === 'function') {
@@ -4271,6 +4386,8 @@
           preloadedTrackCache[targetId] = preloadedTrackCache[next.id];
         }
 
+        lastPreloadedTrackId = next.id;
+
         // Pre-warm browser audio cache
         const pEngine = document.getElementById('spoti-preload-engine');
         if (pEngine) {
@@ -4279,6 +4396,8 @@
         }
       } catch (err) {
         console.warn("Background preload silent notice:", err);
+      } finally {
+        isPreloadingInFlight = false;
       }
     }
 
@@ -4815,10 +4934,10 @@
             <img src="${item.thumbnail}" class="w-8 h-8 rounded-lg object-cover bg-black/40 shrink-0" alt="art" onerror="this.src='https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&q=80'">
             <div class="min-w-0 flex-1">
               <div class="font-medium text-white line-clamp-1 flex items-center gap-1.5">
-                <span class="truncate">${item.title}</span>
+                <span class="truncate">${escapeHtml(item.title)}</span>
                 ${renderEqIndicatorHtml(item.id, item.title)}
               </div>
-              <div class="text-[11px] text-gray-400 line-clamp-1">${item.artist}</div>
+              <div class="text-[11px] text-gray-400 line-clamp-1">${escapeHtml(item.artist)}</div>
             </div>
           </div>
           <div class="flex items-center gap-2 pl-2">
@@ -4844,9 +4963,9 @@
             <img src="${item.thumbnail}" class="w-8 h-8 rounded-lg object-cover bg-black/40 shrink-0" alt="art" onerror="this.src='https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&q=80'">
             <div class="min-w-0 flex-1">
               <div class="font-medium text-white line-clamp-1 flex items-center gap-1.5">
-                <span class="truncate">${item.title}</span>
+                <span class="truncate">${escapeHtml(item.title)}</span>
               </div>
-              <div class="text-[11px] text-gray-400 line-clamp-1">${item.artist}</div>
+              <div class="text-[11px] text-gray-400 line-clamp-1">${escapeHtml(item.artist)}</div>
             </div>
           </div>
           <div class="flex items-center gap-1 pl-2">
@@ -5055,13 +5174,20 @@
           offlineTrackIdSet.add(originalId);
         }
 
+        // Ensure we send a clean HTTP thumbnail URL to PocketBase, not the local Base64 data URI
+        const serverThumbnail = (thumbnail && !thumbnail.startsWith('data:') && thumbnail.length < 4000)
+          ? thumbnail
+          : ((currentTrack && currentTrack.id === id && currentTrack.thumbnail && !currentTrack.thumbnail.startsWith('data:') && currentTrack.thumbnail.length < 4000)
+            ? currentTrack.thumbnail
+            : '');
+
         // Sync track to central PocketBase library
         syncSingleTrackToLibrary({
           id: id,
           title: trackRecord.title,
           artist: trackRecord.artist,
           duration: trackRecord.duration,
-          thumbnail: trackRecord.thumbnail,
+          thumbnail: serverThumbnail,
           album: trackRecord.album,
           source: 'download'
         });
@@ -5084,7 +5210,7 @@
         if (activeTab === 'playlist' && activePlaylistId === 'user_pl_offline_downloads') {
           const trackList = document.getElementById('playlist-tracks-container');
           if (trackList && typeof renderPlaylistTracks === 'function') {
-            const offlineTracks = await SpotiDB.getAllTracks();
+            const offlineTracks = await SpotiDB.getTracksMetadata();
             document.getElementById('pl-desc').innerText = `${offlineTracks.length} tracks saved on this device (offline)`;
             renderPlaylistTracks(offlineTracks, true);
           }
@@ -5153,33 +5279,6 @@
 
     function closeQrModal() {
       document.getElementById('qr-modal').classList.add('hidden');
-    }
-
-    function escapeHtml(str) {
-      if (!str) return '';
-      return String(str)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-    }
-
-    function escapeQuotes(str) {
-      if (!str) return '';
-      return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-    }
-
-    function escapeTrackObj(t) {
-      const copy = {
-        id: t.id,
-        title: t.title,
-        artist: t.artist,
-        duration: t.duration || '',
-        thumbnail: t.thumbnail || '',
-        album: t.album || ''
-      };
-      return JSON.stringify(copy).replace(/"/g, '&quot;');
     }
   </script>
 </body>

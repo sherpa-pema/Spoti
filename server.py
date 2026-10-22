@@ -72,10 +72,10 @@ database.init_db()
 _CACHE: Dict[str, Dict[str, Any]] = {}
 _CACHE_LOCK = threading.Lock()
 
-# Allow requests from local network devices / phones
+# Allow requests from local LAN devices and tunnels securely
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -490,21 +490,21 @@ def get_single_user_playlist(playlist_id: str, authorization: Optional[str] = He
 
 @app.post("/api/user-playlists/{playlist_id}/tracks")
 def add_track_to_user_playlist(playlist_id: str, track: AddTrackRequest, authorization: Optional[str] = Header(None)):
-    """Adds a track to a custom user playlist."""
-    user = get_current_user_optional(authorization)
-    uid = user["uid"] if user else None
-    success = playlist_manager.add_track_to_playlist(playlist_id, track.dict(), uid)
+    """Adds a track to a custom user playlist (requires authentication)."""
+    user = get_current_user(authorization)
+    success = playlist_manager.add_track_to_playlist(playlist_id, track.dict(), user["uid"])
     if not success:
-        raise HTTPException(status_code=404, detail="Playlist not found or not owned")
+        raise HTTPException(status_code=403, detail="Playlist not found or not owned")
     return {"message": "Track added to playlist successfully"}
 
 
 @app.delete("/api/user-playlists/{playlist_id}/tracks/{track_id}")
 def remove_track_from_user_playlist(playlist_id: str, track_id: str, authorization: Optional[str] = Header(None)):
-    """Removes a track from a custom user playlist."""
-    user = get_current_user_optional(authorization)
-    uid = user["uid"] if user else None
-    success = playlist_manager.remove_track_from_playlist(playlist_id, track_id, uid)
+    """Removes a track from a custom user playlist (requires authentication)."""
+    user = get_current_user(authorization)
+    success = playlist_manager.remove_track_from_playlist(playlist_id, track_id, user["uid"])
+    if not success:
+        raise HTTPException(status_code=403, detail="Failed to remove track: playlist not found or not owned")
     return {"success": success}
 
 
@@ -609,7 +609,8 @@ def stream_download_proxy(video_id: str, request: Request):
     """
     High-performance audio streaming endpoint.
     1. Serves directly from server SSD cache (/var/mobile/server/data/music_cache) if present (<10ms).
-    2. Streams from upstream Google CDN while simultaneously caching to server disk for future multi-device play.
+    2. Streams from upstream Google CDN forwarding HTTP Range headers for smooth Safari seeking.
+    3. Caches full streams to disk with worker-isolated temporary files to prevent race conditions.
     """
     try:
         # Check if local cached audio exists first
@@ -624,18 +625,26 @@ def stream_download_proxy(video_id: str, request: Request):
         if not stream_url:
             raise HTTPException(status_code=404, detail="Could not resolve stream URL")
 
+        upstream_headers = {
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)"
+        }
+        client_range = request.headers.get("range")
+        if client_range:
+            upstream_headers["Range"] = client_range
+
         # Stream directly from upstream Google CDN
         req = requests.get(
             stream_url,
             stream=True,
             timeout=20,
-            headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)"}
+            headers=upstream_headers
         )
-        if req.status_code != 200:
+        if req.status_code not in (200, 206):
             raise HTTPException(status_code=req.status_code, detail="Upstream stream fetch failed")
 
         content_length = req.headers.get("Content-Length")
         content_type = req.headers.get("Content-Type", "audio/mp4")
+        content_range = req.headers.get("Content-Range")
 
         headers = {
             "Accept-Ranges": "bytes",
@@ -643,22 +652,34 @@ def stream_download_proxy(video_id: str, request: Request):
         }
         if content_length:
             headers["Content-Length"] = content_length
+        if content_range:
+            headers["Content-Range"] = content_range
 
         if request.method == "HEAD":
             req.close()
-            return Response(status_code=200, headers=headers, media_type=content_type)
+            return Response(status_code=req.status_code, headers=headers, media_type=content_type)
 
-        part_path = os.path.join(stream_downloader.CACHE_DIR, f".part_{video_id}.m4a")
+        import uuid
+        worker_id = uuid.uuid4().hex[:6]
+        part_path = os.path.join(stream_downloader.CACHE_DIR, f".part_{video_id}_{worker_id}.m4a")
         final_path = os.path.join(stream_downloader.CACHE_DIR, f"{video_id}.m4a")
+
+        # Only cache to server disk if this is a full stream from byte 0
+        can_cache_locally = (
+            (not client_range or client_range.startswith("bytes=0-")) and
+            (req.status_code == 200 or (content_range and content_range.startswith("bytes 0-")))
+        )
 
         def iter_chunks():
             f = None
             total_written = 0
             try:
-                try:
-                    f = open(part_path, "wb")
-                except Exception:
-                    f = None
+                if can_cache_locally and not os.path.isfile(final_path):
+                    try:
+                        f = open(part_path, "wb")
+                    except Exception:
+                        f = None
+
                 for chunk in req.iter_content(chunk_size=65536):
                     if chunk:
                         if f:
@@ -668,6 +689,7 @@ def stream_download_proxy(video_id: str, request: Request):
                             except Exception:
                                 pass
                         yield chunk
+
                 if f:
                     f.close()
                     f = None
@@ -697,6 +719,7 @@ def stream_download_proxy(video_id: str, request: Request):
 
         return StreamingResponse(
             iter_chunks(),
+            status_code=req.status_code,
             media_type=content_type,
             headers=headers
         )
@@ -755,11 +778,17 @@ def get_library():
 
 @app.get("/api/library/file/{filename}")
 def serve_library_file(filename: str):
-    """Streams a downloaded audio file from the local music library."""
-    file_path = os.path.join(stream_downloader.MUSIC_DIR, filename)
-    if not os.path.isfile(file_path):
+    """Streams a downloaded audio file from the local music library securely."""
+    safe_name = os.path.basename(filename)
+    base_dir = os.path.realpath(stream_downloader.MUSIC_DIR)
+    file_path = os.path.realpath(os.path.join(base_dir, safe_name))
+
+    # Path traversal guard: must reside strictly inside MUSIC_DIR
+    if not file_path.startswith(base_dir) or not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(file_path, media_type="audio/mpeg", filename=filename)
+
+    media_type = "audio/mpeg" if safe_name.lower().endswith(".mp3") else "audio/mp4"
+    return FileResponse(file_path, media_type=media_type, filename=safe_name)
 
 
 # Mount static folder

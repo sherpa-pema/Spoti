@@ -39,8 +39,8 @@ def _get_username_for_id(user_id: str) -> str:
 
 def verify_token(token: str) -> Optional[Dict[str, Any]]:
     """
-    Verifies a PocketBase user JWT token.
-    Returns dict with 'uid' and 'usr' if valid, None otherwise.
+    Cryptographically verifies a PocketBase user JWT token.
+    Returns dict with 'uid', 'usr', and 'exp' if valid, None otherwise.
     """
     if not token or "." not in token:
         return None
@@ -55,30 +55,28 @@ def verify_token(token: str) -> Optional[Dict[str, Any]]:
                 del _TOKEN_CACHE[token]
 
     try:
-        parts = token.split(".")
-        if len(parts) != 3:
-            return None
+        user_pb = database.get_user_pb(token)
+        refreshed = user_pb.collection("users").auth_refresh()
+        user_record = refreshed.record
 
-        # Base64 decode payload
-        padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
-        raw_payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        user_id = user_record.id
+        username = getattr(user_record, "name", "") or getattr(user_record, "email", "").split("@")[0] or user_id
 
-        if raw_payload.get("exp", 0) < now:
-            return None
-
-        user_id = raw_payload.get("id")
-        if not user_id:
-            return None
-
-        username = _get_username_for_id(user_id)
+        # Cache valid verified token for up to 30 mins
         payload = {
             "uid": user_id,
             "usr": username,
-            "exp": raw_payload.get("exp", 0)
+            "exp": now + 1800
         }
 
         with _CACHE_LOCK:
+            # Enforce max cache size on iPhone 7
+            if len(_TOKEN_CACHE) > 300:
+                _TOKEN_CACHE.clear()
+            if len(_USERNAME_CACHE) > 300:
+                _USERNAME_CACHE.clear()
             _TOKEN_CACHE[token] = (payload, now)
+            _USERNAME_CACHE[user_id] = username
 
         return payload
     except Exception:
