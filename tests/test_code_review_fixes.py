@@ -98,3 +98,41 @@ def test_range_cache_corruption_logic():
 
     # Complete 206 serving byte 0 to end: MUST BE TRUE
     assert is_full_stream(206, "3400120", content_range_full, "bytes=0-")
+
+
+def test_playlist_datetime_serialization_and_flags():
+    """Validates that playlist manager serializes datetimes to ISO strings and sets system/user flags."""
+    import datetime
+    import json
+    import playlist_manager
+
+    # 1. Test _format_created
+    dt = datetime.datetime(2026, 10, 22, 6, 29, 49)
+    assert playlist_manager._format_created(dt) == "2026-10-22T06:29:49"
+    assert playlist_manager._format_created(None) == ""
+    assert playlist_manager._format_created("2026-10-22 06:29:49") == "2026-10-22 06:29:49"
+
+    # 2. Mock PocketBase record with datetime
+    mock_record = unittest.mock.MagicMock()
+    mock_record.id = "pl_test_123"
+    mock_record.created = dt
+
+    with unittest.mock.patch("database.get_admin_pb") as mock_get_admin:
+        mock_pb = unittest.mock.MagicMock()
+        mock_pb.collection.return_value.create.return_value = mock_record
+        mock_get_admin.return_value = mock_pb
+
+        created = playlist_manager.create_playlist("user_123", "My Test Playlist")
+        assert created["id"] == "pl_test_123"
+        assert created["title"] == "My Test Playlist"
+        assert created["is_user_playlist"] is True
+        assert created["is_system"] is False
+        assert created["created_at"] == "2026-10-22T06:29:49"
+
+        # Ensure json.dumps passes without TypeError: Object of type datetime is not JSON serializable
+        serialized = json.dumps(created)
+        deserialized = json.loads(serialized)
+        assert deserialized["created_at"] == "2026-10-22T06:29:49"
+        assert deserialized["is_user_playlist"] is True
+        assert deserialized["is_system"] is False
+

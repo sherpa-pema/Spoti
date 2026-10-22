@@ -23,6 +23,15 @@ def _clean_thumbnail(thumb: Any) -> str:
     return clean
 
 
+def _format_created(val: Any) -> str:
+    """Safely converts PocketBase datetime or timestamp values into an ISO-8601 string."""
+    if not val:
+        return ""
+    if hasattr(val, "isoformat"):
+        return val.isoformat()
+    return str(val)
+
+
 def _migrate_legacy_json(user_id: str):
     """Legacy migration no-op (data already migrated to PocketBase)."""
     pass
@@ -97,7 +106,7 @@ def get_all_playlists(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
                 "title": pl.title,
                 "description": getattr(pl, "description", "") or "",
                 "thumbnail": thumb,
-                "created_at": getattr(pl, "created", ""),
+                "created_at": _format_created(getattr(pl, "created", "")),
                 "track_count": cnt,
                 "is_user_playlist": True,
                 "is_system": False,
@@ -126,11 +135,12 @@ def create_playlist(user_id: str, name: str, description: str = "") -> Dict[str,
         "id": record.id,
         "title": name,
         "description": description,
-        "created_at": getattr(record, "created", time.time()),
+        "created_at": _format_created(getattr(record, "created", "")),
         "thumbnail": thumb,
         "tracks": [],
         "track_count": 0,
         "is_user_playlist": True,
+        "is_system": False,
     }
 
 
@@ -206,10 +216,11 @@ def get_playlist(playlist_id: str, user_id: Optional[str] = None) -> Optional[Di
             "title": pl.title,
             "description": getattr(pl, "description", "") or "",
             "thumbnail": thumb,
-            "created_at": getattr(pl, "created", ""),
+            "created_at": _format_created(getattr(pl, "created", "")),
             "tracks": tracks,
             "track_count": len(tracks),
             "is_user_playlist": True,
+            "is_system": False,
             "user_id": pl.user,
         }
     except ClientResponseError as e:
@@ -339,7 +350,7 @@ def get_user_liked_tracks(user_id: str) -> List[Dict[str, Any]]:
             "duration": getattr(f, "duration", "--:--"),
             "thumbnail": getattr(f, "thumbnail", ""),
             "album": getattr(f, "album", ""),
-            "liked_at": getattr(f, "created", "")
+            "liked_at": _format_created(getattr(f, "created", ""))
         } for f in favs]
     except Exception as e:
         print(f"Error fetching user favorites from PocketBase: {e}", file=sys.stderr)
@@ -442,7 +453,7 @@ def get_user_library_tracks(user_id: str) -> List[Dict[str, Any]]:
             "thumbnail": getattr(r, "thumbnail", "") or "",
             "album": getattr(r, "album", "") or "",
             "source": getattr(r, "source", "download") or "download",
-            "saved_at": getattr(r, "created", "")
+            "saved_at": _format_created(getattr(r, "created", ""))
         } for r in records]
     except Exception as e:
         print(f"Error fetching user library from PocketBase: {e}", file=sys.stderr)

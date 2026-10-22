@@ -1998,6 +1998,9 @@
           options.headers['Authorization'] = `Bearer ${token}`;
         }
       }
+      if (!options.cache) {
+        options.cache = 'no-store';
+      }
       return await fetch(url, options);
     }
 
@@ -2820,11 +2823,9 @@
       const plCountEl = document.getElementById('user-pl-count');
       if (plCountEl) plCountEl.innerText = customPlaylists.length;
 
-      const offlineCount = await SpotiDB.count();
-      if (currentSeq !== playlistRenderSeq) return;
-
+      const currentOfflineCount = (typeof offlineTracks !== 'undefined' && Array.isArray(offlineTracks)) ? offlineTracks.length : 0;
       const offlineBadgeEl = document.getElementById('offline-songs-count');
-      if (offlineBadgeEl) offlineBadgeEl.innerText = offlineCount;
+      if (offlineBadgeEl) offlineBadgeEl.innerText = currentOfflineCount;
 
       const fragment = document.createDocumentFragment();
 
@@ -2835,12 +2836,12 @@
 
         if (pl.is_offline_playlist) {
           const totalSyncedCount = pl.track_count || 0;
-          if (totalSyncedCount > 0 && totalSyncedCount !== offlineCount) {
-            badgeText = `${totalSyncedCount} synced • ${offlineCount} on device`;
-            descText = `${totalSyncedCount} songs in library (${offlineCount} saved on this device)`;
+          if (totalSyncedCount > 0 && totalSyncedCount !== currentOfflineCount) {
+            badgeText = `${totalSyncedCount} synced • ${currentOfflineCount} on device`;
+            descText = `${totalSyncedCount} songs in library (${currentOfflineCount} saved on this device)`;
           } else {
-            badgeText = `${offlineCount} on device`;
-            descText = `${offlineCount} songs saved on this device (offline)`;
+            badgeText = `${currentOfflineCount} on device`;
+            descText = `${currentOfflineCount} songs saved on this device (offline)`;
           }
           const firstThumb = (offlineTracks.length > 0 && offlineTracks[0].thumbnail) 
             ? offlineTracks[0].thumbnail 
@@ -2880,13 +2881,14 @@
         const card = document.createElement('div');
         card.className = "glass-card p-2.5 rounded-2xl flex items-center gap-3 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
         card.onclick = () => openPlaylist(pl.id, true);
+        const badgeElId = pl.is_offline_playlist ? 'id="user-pl-offline-badge-text"' : '';
         card.innerHTML = `
           <div class="relative w-14 h-14 rounded-xl overflow-hidden bg-white/5 shrink-0 shadow flex items-center justify-center">
             ${thumbMarkup}
           </div>
           <div class="min-w-0 flex-1">
             <div class="text-sm font-semibold text-white line-clamp-1">${escapeHtml(pl.title)}</div>
-            <div class="text-xs text-indigo-400 line-clamp-1 mt-0.5">${escapeHtml(badgeText)}</div>
+            <div ${badgeElId} class="text-xs text-indigo-400 line-clamp-1 mt-0.5">${escapeHtml(badgeText)}</div>
           </div>
           <span class="text-xs text-gray-400 p-2">▶</span>
         `;
@@ -2911,6 +2913,25 @@
       } else {
         container.innerHTML = '';
         container.appendChild(fragment);
+      }
+
+      // Asynchronously refresh actual on-device count without delaying playlist cards render
+      if (typeof SpotiDB !== 'undefined' && SpotiDB.count) {
+        SpotiDB.count().then(offlineCount => {
+          if (currentSeq !== playlistRenderSeq) return;
+          const badgeEl = document.getElementById('offline-songs-count');
+          if (badgeEl) badgeEl.innerText = offlineCount;
+          const dlBadge = document.getElementById('user-pl-offline-badge-text');
+          if (dlBadge) {
+            const offPl = list.find(p => p.is_offline_playlist);
+            const totalSynced = (offPl && offPl.track_count) || 0;
+            if (totalSynced > 0 && totalSynced !== offlineCount) {
+              dlBadge.innerText = `${totalSynced} synced • ${offlineCount} on device`;
+            } else {
+              dlBadge.innerText = `${offlineCount} on device`;
+            }
+          }
+        }).catch(() => {});
       }
     }
 
@@ -2949,19 +2970,22 @@
       // 2. Refresh with server playlists if online
       if (navigator.onLine && localStorage.getItem('spoti_token')) {
         try {
-          const res = await authFetch('/api/user-playlists');
+          const res = await authFetch('/api/user-playlists', { cache: 'no-store' });
           if (res.ok) {
             const data = await res.json();
-            let playlists = data.playlists || [];
-            // Preserve any unsynced local-only playlists
-            const localPlaylists = getLocalPlaylists().filter(p => p.id && p.id.startsWith('pl_local_'));
+            let serverPlaylists = data.playlists || [];
+            
+            // Smart Merge: Keep all server playlists, and preserve any playlists in local cache
+            // that aren't on the server yet (e.g. newly created or offline)
+            const localPlaylists = getLocalPlaylists();
+            const merged = [...serverPlaylists];
             for (const lp of localPlaylists) {
-              if (!playlists.some(p => p.id === lp.id)) {
-                playlists.push(lp);
+              if (lp && lp.id && !merged.some(p => p.id === lp.id)) {
+                merged.push(lp);
               }
             }
-            saveLocalPlaylists(playlists);
-            await renderUserPlaylistsDOM(playlists);
+            saveLocalPlaylists(merged);
+            await renderUserPlaylistsDOM(merged);
           }
         } catch (err) {
           console.warn("Online playlist fetch failed, relying on cache:", err);
@@ -2970,6 +2994,9 @@
           }
         }
       } else if (!cached || cached.length === 0) {
+        await renderUserPlaylistsDOM(getLocalPlaylists());
+      }
+    }
         await renderUserPlaylistsDOM(getLocalPlaylists());
       }
     }
@@ -3028,6 +3055,8 @@
           });
           if (res.ok) {
             createdPl = await res.json();
+            createdPl.is_user_playlist = true;
+            createdPl.is_system = false;
           } else {
             isOfflineCreated = true;
           }
@@ -3046,6 +3075,7 @@
           title: name,
           description: desc,
           is_user_playlist: true,
+          is_system: false,
           is_local: true,
           track_count: 0,
           thumbnail: '',
@@ -3078,7 +3108,10 @@
 
       // Immediately navigate to Library tab and Playlists subtab so user sees the new playlist right away
       switchTab('library');
-      switchLibrarySubtab('playlists');
+      switchLibrarySubtab('playlists', true);
+
+      // Render local cache immediately so the user sees the new playlist with 0ms delay
+      renderUserPlaylistsDOM(getLocalPlaylists());
 
       // If there was a track waiting to be added, add it immediately
       if (trackPendingAddToPlaylist) {
@@ -3169,19 +3202,22 @@
       let playlists = [];
       if (navigator.onLine && localStorage.getItem('spoti_token')) {
         try {
-          const res = await authFetch('/api/user-playlists');
+          const res = await authFetch('/api/user-playlists', { cache: 'no-store' });
           if (res.ok) {
             const data = await res.json();
-            playlists = data.playlists || [];
-            userPlaylistsCache = playlists;
-            // Preserve unsynced local playlists
-            const localPlaylists = getLocalPlaylists().filter(p => p.id && p.id.startsWith('pl_local_'));
+            let serverPlaylists = data.playlists || [];
+            
+            // Smart Merge: Keep all server playlists, and preserve any local playlists
+            const localPlaylists = getLocalPlaylists();
+            const merged = [...serverPlaylists];
             for (const lp of localPlaylists) {
-              if (!playlists.some(p => p.id === lp.id)) {
-                playlists.push(lp);
+              if (lp && lp.id && !merged.some(p => p.id === lp.id)) {
+                merged.push(lp);
               }
             }
+            playlists = merged;
             saveLocalPlaylists(playlists);
+            userPlaylistsCache = playlists;
           } else {
             playlists = getLocalPlaylists();
           }

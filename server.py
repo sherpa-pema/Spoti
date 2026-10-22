@@ -113,6 +113,11 @@ async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    if request.url.path.startswith("/api/"):
+        if "Cache-Control" not in response.headers:
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
     return response
 
 
@@ -581,7 +586,7 @@ def get_mood_playlists(params: str = Query(...)):
 # -------------------------------------------------------------
 @app.get("/api/playlist/{playlist_id}")
 def get_playlist(
-    playlist_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    playlist_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{1,64}$"),
     authorization: Optional[str] = Header(None)
 ):
     """Fetches full tracks for a playlist (User Custom / PocketBase, System, or YouTube Music)."""
@@ -618,7 +623,7 @@ def create_user_playlist(req: CreatePlaylistRequest, authorization: Optional[str
 
 @app.get("/api/user-playlists/{playlist_id}")
 def get_single_user_playlist(
-    playlist_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    playlist_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{1,64}$"),
     authorization: Optional[str] = Header(None)
 ):
     """Returns a specific custom playlist."""
@@ -633,7 +638,7 @@ def get_single_user_playlist(
 @app.post("/api/user-playlists/{playlist_id}/tracks")
 def add_track_to_user_playlist(
     track: AddTrackRequest,
-    playlist_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    playlist_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{1,64}$"),
     authorization: Optional[str] = Header(None)
 ):
     """Adds a track to a custom user playlist (requires authentication)."""
@@ -646,8 +651,8 @@ def add_track_to_user_playlist(
 
 @app.delete("/api/user-playlists/{playlist_id}/tracks/{track_id}")
 def remove_track_from_user_playlist(
-    playlist_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
-    track_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    playlist_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{1,64}$"),
+    track_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{1,64}$"),
     authorization: Optional[str] = Header(None)
 ):
     """Removes a track from a custom user playlist (requires authentication)."""
@@ -660,7 +665,7 @@ def remove_track_from_user_playlist(
 
 @app.delete("/api/user-playlists/{playlist_id}")
 def delete_user_playlist(
-    playlist_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    playlist_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{1,64}$"),
     authorization: Optional[str] = Header(None)
 ):
     """Deletes a custom user playlist."""
@@ -690,7 +695,7 @@ def add_favorite(track: FavoriteRequest, authorization: Optional[str] = Header(N
 
 @app.delete("/api/favorites/{track_id}")
 def delete_favorite(
-    track_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    track_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{1,64}$"),
     authorization: Optional[str] = Header(None)
 ):
     user = get_current_user(authorization)
@@ -700,7 +705,7 @@ def delete_favorite(
 
 @app.get("/api/favorites/check/{track_id}")
 def check_favorite(
-    track_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    track_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{1,64}$"),
     authorization: Optional[str] = Header(None)
 ):
     user = get_current_user_optional(authorization)
@@ -730,7 +735,7 @@ def add_user_library_track(track: LibraryTrackRequest, authorization: Optional[s
 
 @app.delete("/api/library/tracks/{track_id}")
 def remove_user_library_track(
-    track_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    track_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{1,64}$"),
     authorization: Optional[str] = Header(None)
 ):
     """Removes a track from user's central library in PocketBase."""
@@ -741,7 +746,7 @@ def remove_user_library_track(
 
 @app.get("/api/library/check/{track_id}")
 def check_user_library_track(
-    track_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{1,64}$"),
+    track_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{1,64}$"),
     authorization: Optional[str] = Header(None)
 ):
     """Checks if a track is in user's central library."""
@@ -755,14 +760,14 @@ def check_user_library_track(
 # Audio Playback, Radio & Download Endpoints
 # -------------------------------------------------------------
 @app.get("/api/radio/{video_id}")
-def get_radio(video_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{11}$")):
+def get_radio(video_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{11}$")):
     """Generates continuous radio recommendations based on a track."""
     tracks = music_api.get_radio_tracks(video_id, limit=35)
     return {"tracks": tracks}
 
 
 @app.get("/api/stream/{video_id}")
-def get_stream(video_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{11}$")):
+def get_stream(video_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{11}$")):
     """Resolves audio stream URL or local downloaded file path."""
     try:
         data = stream_downloader.get_cached_or_local_stream(video_id)
@@ -775,7 +780,7 @@ def get_stream(video_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{11}$")):
 @app.api_route("/api/download/stream/{video_id}", methods=["GET", "HEAD"])
 def stream_download_proxy(
     request: Request,
-    video_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{11}$")
+    video_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{11}$")
 ):
     """
     High-performance audio streaming endpoint.
@@ -951,7 +956,7 @@ def stream_download_proxy(
 @limiter.limit("20/minute")
 def trigger_download(
     request: Request,
-    video_id: str = Path(..., regex=r"^[A-Za-z0-9_-]{11}$"),
+    video_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{11}$"),
     title: str = Query("", max_length=200),
     artist: str = Query("", max_length=200),
     authorization: Optional[str] = Header(None)
