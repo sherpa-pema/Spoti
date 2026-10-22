@@ -214,7 +214,13 @@
           <h2 class="text-lg font-bold text-white flex items-center gap-2">
             <span>🔥</span> Trending Now
           </h2>
-          <span class="text-xs text-indigo-400 font-medium cursor-pointer" onclick="loadTrending()">Refresh</span>
+          <div class="flex items-center gap-2">
+            <span id="explore-last-updated" class="text-[11px] text-gray-400 font-normal"></span>
+            <button onclick="loadTrending(true)" class="text-xs text-indigo-400 hover:text-indigo-300 font-medium px-2 py-0.5 rounded-md hover:bg-white/5 active:scale-95 transition flex items-center gap-1" title="Refresh charts from source">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              <span>Refresh</span>
+            </button>
+          </div>
         </div>
         <div id="trending-container" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
           <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
@@ -3501,11 +3507,20 @@
       renderBillboardCards();
     }
 
-    async function loadTrending() {
+    async function loadTrending(force = false) {
       const trendingContainer = document.getElementById('trending-container');
       const billboardContainer = document.getElementById('billboard-container');
       const newReleasesContainer = document.getElementById('new-releases-container');
       const genresContainer = document.getElementById('genres-container');
+
+      if (force) {
+        try {
+          triggerHaptic('light');
+          await fetch('/api/home/refresh', { method: 'POST' });
+        } catch (err) {
+          console.warn('Refresh request failed:', err);
+        }
+      }
 
       // Set skeleton loaders
       if (trendingContainer) {
@@ -3599,6 +3614,15 @@
             `;
             genresContainer.appendChild(card);
           });
+        }
+
+        // 5. Update timestamp badge
+        if (data.last_updated) {
+          const updateEl = document.getElementById('explore-last-updated');
+          if (updateEl) {
+            updateEl.textContent = `Updated ${data.last_updated.slice(5, 16)}`;
+            updateEl.title = `Last refreshed from charts: ${data.last_updated}`;
+          }
         }
 
       } catch (e) {

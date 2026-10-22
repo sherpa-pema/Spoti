@@ -4,6 +4,7 @@ import io
 import time
 import socket
 import threading
+import subprocess
 from typing import Optional, Dict, Any, List
 import requests
 from fastapi import FastAPI, Query, HTTPException, Header, Request
@@ -194,6 +195,68 @@ import json
 _RESOLVE_CACHE: Dict[str, Dict[str, Any]] = {}
 _RESOLVE_LOCK = threading.Lock()
 
+_FETCH_IN_PROGRESS = False
+_FETCH_LOCK = threading.Lock()
+
+
+def get_explore_cache_meta() -> Dict[str, Any]:
+    """Retrieves metadata about when Explore charts were last refreshed."""
+    paths_to_check = [
+        "/var/mobile/music-data/.cache_meta.json",
+        os.path.join(PROJECT_DIR, "music-data", ".cache_meta.json")
+    ]
+    for p in paths_to_check:
+        if os.path.isfile(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+    return {}
+
+
+def trigger_daily_fetch_if_stale(force: bool = False) -> bool:
+    """Checks if Explore data is older than 24 hours and kicks off background daily_fetcher."""
+    global _FETCH_IN_PROGRESS
+    with _FETCH_LOCK:
+        if _FETCH_IN_PROGRESS:
+            return False
+
+        meta = get_explore_cache_meta()
+        last_fetch = meta.get("last_fetch", 0)
+        now = time.time()
+        if not force and (now - last_fetch < 86400):
+            return False
+
+        _FETCH_IN_PROGRESS = True
+
+    def _worker():
+        global _FETCH_IN_PROGRESS
+        try:
+            runner = "/var/mobile/server/scripts/spoti-fetcher-runner.sh"
+            cmd = [runner] if os.path.exists(runner) else [sys.executable, os.path.join(PROJECT_DIR, "daily_fetcher.py")]
+            if force:
+                cmd.append("--force")
+            print(f"[DailyFetcher] Launching background chart fetch (force={force})...")
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            if res.returncode == 0:
+                print("[DailyFetcher] Background chart fetch succeeded!")
+                # Invalidate in-memory cache so next request gets fresh data
+                with _CACHE_LOCK:
+                    if "home" in _CACHE:
+                        del _CACHE["home"]
+            else:
+                print(f"[DailyFetcher] Background fetch failed (code {res.returncode}): {res.stderr}")
+        except Exception as e:
+            print(f"Warning: Daily fetch worker error: {e}")
+        finally:
+            with _FETCH_LOCK:
+                _FETCH_IN_PROGRESS = False
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    return True
+
 
 def load_explore_from_pocketbase() -> Optional[Dict[str, Any]]:
     """Loads curated Explore data from PocketBase collections."""
@@ -247,12 +310,16 @@ def load_explore_from_pocketbase() -> Optional[Dict[str, Any]]:
             "tracks": getattr(r, "tracks", [])
         } for r in genres_recs]
 
+        meta = get_explore_cache_meta()
+
         return {
             "trending": trending,
             "billboard": billboard,
             "new_releases": new_releases,
             "genres": genres,
-            "source": "pocketbase"
+            "source": "pocketbase",
+            "last_updated": meta.get("date_str", ""),
+            "last_fetch": meta.get("last_fetch", 0)
         }
     except Exception as e:
         print(f"Warning: Failed to load explore data from PocketBase: {e}")
@@ -286,12 +353,16 @@ def load_explore_from_json() -> Optional[Dict[str, Any]]:
                     with open(genres_file, "r", encoding="utf-8") as f:
                         genres = json.load(f)
 
+                meta = get_explore_cache_meta()
+
                 return {
                     "trending": trending,
                     "billboard": billboard,
                     "new_releases": new_releases,
                     "genres": genres,
-                    "source": "fallback_json"
+                    "source": "fallback_json",
+                    "last_updated": meta.get("date_str", ""),
+                    "last_fetch": meta.get("last_fetch", 0)
                 }
             except Exception as e:
                 print(f"Warning: Failed to load explore JSON from {d}: {e}")
@@ -318,6 +389,9 @@ def load_explore_legacy() -> Dict[str, Any]:
 @app.get("/api/home")
 def get_home_feed():
     """Fetches daily curated Explore feed (Trending, Billboard Hot 100, New Releases, Genres) from PocketBase with JSON fallback and in-memory caching."""
+    # Self-healing check: if charts are older than 24 hours, fire background fetcher
+    trigger_daily_fetch_if_stale(force=False)
+
     now = time.time()
     with _CACHE_LOCK:
         if "home" in _CACHE and _CACHE["home"]["expires_at"] > now:
@@ -335,6 +409,17 @@ def get_home_feed():
             "expires_at": now + 600,
         }
     return data
+
+
+@app.post("/api/home/refresh")
+def force_refresh_home_feed():
+    """Forces an immediate on-demand upstream fetch for Trending, Billboard, and New Releases."""
+    triggered = trigger_daily_fetch_if_stale(force=True)
+    return {
+        "success": True,
+        "triggered": triggered,
+        "message": "Fresh music fetch initiated in background. Refreshing charts..." if triggered else "A chart fetch is already in progress."
+    }
 
 
 @app.get("/api/genre/{genre_id}/tracks")
