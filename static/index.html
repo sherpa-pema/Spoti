@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#0c0d12">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -42,6 +42,15 @@
     .app-header, .app-nav, .app-mini-player, button, input[type="range"] {
       user-select: none;
       -webkit-user-select: none;
+    }
+    /* Prevent iOS Safari 16px auto-zoom bug on focus */
+    input[type="text"],
+    input[type="search"],
+    input[type="password"],
+    input[type="email"],
+    select,
+    textarea {
+      font-size: 16px !important;
     }
     .app-header {
       padding-top: max(calc(env(safe-area-inset-top, 0px) + 6px), 12px);
@@ -312,9 +321,10 @@
           type="search" 
           id="search-input" 
           placeholder="Search songs, artists, playlists..." 
-          class="w-full bg-white/10 text-white placeholder-gray-400 px-4 py-3 pl-11 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 transition text-sm"
+          class="w-full bg-white/10 text-white placeholder-gray-400 px-4 py-3 pl-11 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 transition text-base"
           onkeydown="handleSearchKeydown(event)"
           oninput="onSearchInput(this.value)"
+          onblur="resetViewportScroll()"
           autocomplete="off"
         />
         <svg class="w-5 h-5 text-gray-400 absolute left-3.5 top-3.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -854,6 +864,16 @@
 
   <!-- Application Logic -->
   <script>
+    function resetViewportScroll() {
+      try {
+        window.scrollTo(0, 0);
+        document.body.scrollTop = 0;
+        if (document.documentElement) {
+          document.documentElement.scrollTop = 0;
+        }
+      } catch (e) {}
+    }
+
     function escapeHtml(str) {
       if (str === null || str === undefined) return '';
       return String(str)
@@ -2715,6 +2735,7 @@
       }
 
       activeTab = tab;
+      resetViewportScroll();
       if (tab !== 'playlist') {
         activePlaylistId = null;
       }
