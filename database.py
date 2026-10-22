@@ -6,9 +6,35 @@ from typing import Optional, Dict, Any
 from pocketbase import PocketBase
 from pocketbase.client import ClientResponseError
 
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def _load_env():
+    """Loads configuration variables from .env files without external dependencies."""
+    env_paths = [
+        os.path.join(PROJECT_DIR, ".env"),
+        "/var/mobile/server/data/spoti.env",
+        "/var/mobile/server/.env"
+    ]
+    for p in env_paths:
+        if os.path.isfile(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            k = k.strip()
+                            v = v.strip().strip('"').strip("'")
+                            if k and k not in os.environ:
+                                os.environ[k] = v
+            except Exception:
+                pass
+
+_load_env()
+
 PB_URL = os.environ.get("POCKETBASE_URL", "http://192.168.1.67:8090")
-SUPERUSER_EMAIL = os.environ.get("PB_SUPERUSER_EMAIL", "camy.labs.np@gmail.com")
-SUPERUSER_PASSWORD = os.environ.get("PB_SUPERUSER_PASSWORD", "Dun21c@n")
+SUPERUSER_EMAIL = os.environ.get("PB_SUPERUSER_EMAIL", "")
+SUPERUSER_PASSWORD = os.environ.get("PB_SUPERUSER_PASSWORD", "")
 
 _ADMIN_CLIENT: Optional[PocketBase] = None
 _ADMIN_TOKEN_EXP: float = 0
@@ -28,9 +54,18 @@ def get_admin_pb() -> PocketBase:
         if _ADMIN_CLIENT is not None and _ADMIN_TOKEN_EXP > (now + 60):
             return _ADMIN_CLIENT
 
+        email = os.environ.get("PB_SUPERUSER_EMAIL") or SUPERUSER_EMAIL
+        password = os.environ.get("PB_SUPERUSER_PASSWORD") or SUPERUSER_PASSWORD
+
+        if not email or not password:
+            raise RuntimeError(
+                "PocketBase superuser credentials not configured. "
+                "Please set PB_SUPERUSER_EMAIL and PB_SUPERUSER_PASSWORD in environment or .env file."
+            )
+
         pb = PocketBase(PB_URL)
         try:
-            pb.collection("_superusers").auth_with_password(SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+            pb.collection("_superusers").auth_with_password(email, password)
             _ADMIN_CLIENT = pb
             _ADMIN_TOKEN_EXP = now + 7200
             return _ADMIN_CLIENT

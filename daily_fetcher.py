@@ -47,9 +47,32 @@ try:
 except ImportError:
     YTMusic = None
 
-PB_URL = os.environ.get("PB_URL", "http://192.168.1.67:8090")
-SUPERUSER_EMAIL = os.environ.get("PB_SUPERUSER_EMAIL", "camy.labs.np@gmail.com")
-SUPERUSER_PASS = os.environ.get("PB_SUPERUSER_PASS", "Dun21c@n")
+def _load_env():
+    env_paths = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"),
+        "/var/mobile/server/data/spoti.env",
+        "/var/mobile/server/.env"
+    ]
+    for p in env_paths:
+        if os.path.isfile(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            k = k.strip()
+                            v = v.strip().strip('"').strip("'")
+                            if k and k not in os.environ:
+                                os.environ[k] = v
+            except Exception:
+                pass
+
+_load_env()
+
+PB_URL = os.environ.get("POCKETBASE_URL") or os.environ.get("PB_URL", "http://192.168.1.67:8090")
+SUPERUSER_EMAIL = os.environ.get("PB_SUPERUSER_EMAIL", "")
+SUPERUSER_PASS = os.environ.get("PB_SUPERUSER_PASSWORD") or os.environ.get("PB_SUPERUSER_PASS", "")
 
 # Storage directories
 PRIMARY_DATA_DIR = "/var/mobile/music-data"
@@ -495,9 +518,14 @@ def fetch_genres() -> List[Dict[str, Any]]:
 # Persistence: PocketBase + JSON Backup
 # ---------------------------------------------------------------------------
 def get_pb_token() -> Optional[str]:
+    email = os.environ.get("PB_SUPERUSER_EMAIL") or SUPERUSER_EMAIL
+    pwd = os.environ.get("PB_SUPERUSER_PASSWORD") or os.environ.get("PB_SUPERUSER_PASS") or SUPERUSER_PASS
+    if not email or not pwd:
+        print("Notice: PocketBase superuser credentials not configured. Skipping remote PB sync.")
+        return None
     try:
         url = f"{PB_URL}/api/collections/_superusers/auth-with-password"
-        payload = json.dumps({"identity": SUPERUSER_EMAIL, "password": SUPERUSER_PASS}).encode("utf-8")
+        payload = json.dumps({"identity": email, "password": pwd}).encode("utf-8")
         req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
