@@ -2931,14 +2931,14 @@
       const offView = document.getElementById('library-offline-view');
 
       if (subtab === 'playlists') {
-        if (plBtn) plBtn.className = "px-3.5 py-1.5 rounded-xl bg-white/10 text-white font-medium transition";
-        if (offBtn) offBtn.className = "px-3.5 py-1.5 rounded-xl text-gray-400 hover:text-white transition";
+        if (plBtn) plBtn.className = "touch-target h-11 px-4 rounded-xl bg-white/10 text-white font-semibold transition";
+        if (offBtn) offBtn.className = "touch-target h-11 px-4 rounded-xl text-gray-400 hover:text-white transition";
         if (plView) plView.classList.remove('hidden');
         if (offView) offView.classList.add('hidden');
         loadUserPlaylists();
       } else {
-        if (offBtn) offBtn.className = "px-3.5 py-1.5 rounded-xl bg-white/10 text-white font-medium transition";
-        if (plBtn) plBtn.className = "px-3.5 py-1.5 rounded-xl text-gray-400 hover:text-white transition";
+        if (offBtn) offBtn.className = "touch-target h-11 px-4 rounded-xl bg-white/10 text-white font-semibold transition";
+        if (plBtn) plBtn.className = "touch-target h-11 px-4 rounded-xl text-gray-400 hover:text-white transition";
         if (offView) offView.classList.remove('hidden');
         if (plView) plView.classList.add('hidden');
         loadLibrary();
@@ -2952,10 +2952,10 @@
 
       const currentSeq = ++playlistRenderSeq;
 
-      let list = Array.isArray(playlists) ? [...playlists] : [];
+      let list = Array.isArray(playlists) ? playlists.filter(p => p && typeof p === 'object') : [];
 
       // Always ensure Downloaded Songs virtual playlist exists, even offline
-      if (!list.some(p => p.id === 'user_pl_offline_downloads')) {
+      if (!list.some(p => p && p.id === 'user_pl_offline_downloads')) {
         list.unshift({
           id: 'user_pl_offline_downloads',
           title: 'Downloaded Songs',
@@ -2969,82 +2969,80 @@
       userPlaylistsCache = list;
 
       // Custom playlists are user-created non-system playlists
-      const customPlaylists = list.filter(p => p.is_user_playlist && !p.is_system);
+      const customPlaylists = list.filter(p => p && p.is_user_playlist && !p.is_system);
       const plCountEl = document.getElementById('user-pl-count');
       if (plCountEl) plCountEl.innerText = customPlaylists.length;
 
-      const currentOfflineCount = (typeof offlineTracks !== 'undefined' && Array.isArray(offlineTracks)) ? offlineTracks.length : 0;
+      const currentOfflineCount = (typeof offlineTrackIdSet !== 'undefined' && offlineTrackIdSet instanceof Set)
+        ? offlineTrackIdSet.size
+        : 0;
       const offlineBadgeEl = document.getElementById('offline-songs-count');
       if (offlineBadgeEl) offlineBadgeEl.innerText = currentOfflineCount;
 
       const fragment = document.createDocumentFragment();
 
       list.forEach(pl => {
-        let badgeText = `${pl.track_count || 0} ${pl.track_count === 1 ? 'song' : 'songs'}`;
-        let descText = pl.description || 'Custom Playlist';
-        let thumbMarkup = '';
+        try {
+          let badgeText = `${pl.track_count || 0} ${pl.track_count === 1 ? 'song' : 'songs'}`;
+          let descText = pl.description || 'Custom Playlist';
+          let thumbMarkup = '';
 
-        if (pl.is_offline_playlist) {
-          const totalSyncedCount = pl.track_count || 0;
-          if (totalSyncedCount > 0 && totalSyncedCount !== currentOfflineCount) {
-            badgeText = `${totalSyncedCount} synced • ${currentOfflineCount} on device`;
-            descText = `${totalSyncedCount} songs in library (${currentOfflineCount} saved on this device)`;
-          } else {
-            badgeText = `${currentOfflineCount} on device`;
-            descText = `${currentOfflineCount} songs saved on this device (offline)`;
-          }
-          const firstThumb = (offlineTracks.length > 0 && offlineTracks[0].thumbnail) 
-            ? offlineTracks[0].thumbnail 
-            : (pl.thumbnail && !pl.thumbnail.includes('unsplash') ? pl.thumbnail : '');
-          if (firstThumb) {
+          if (pl.is_offline_playlist) {
+            const totalSyncedCount = pl.track_count || 0;
+            if (totalSyncedCount > 0 && totalSyncedCount !== currentOfflineCount) {
+              badgeText = `${totalSyncedCount} synced • ${currentOfflineCount} on device`;
+              descText = `${totalSyncedCount} songs in library (${currentOfflineCount} saved on this device)`;
+            } else {
+              badgeText = `${currentOfflineCount} on device`;
+              descText = `${currentOfflineCount} songs saved on this device (offline)`;
+            }
+            const firstThumb = (pl.tracks && pl.tracks.length > 0 && pl.tracks[0].thumbnail) 
+              ? pl.tracks[0].thumbnail 
+              : (pl.thumbnail && !pl.thumbnail.includes('unsplash') ? pl.thumbnail : '');
             thumbMarkup = `
-              <img src="${firstThumb}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">
-              <div class="w-full h-full bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white" style="display:none;">
+              <img id="user-pl-offline-thumb-img" src="${firstThumb}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" style="${firstThumb ? '' : 'display:none;'}" alt="pl">
+              <div class="w-full h-full bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white" style="${firstThumb ? 'display:none;' : ''}">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               </div>
             `;
-          } else {
+          } else if (pl.is_liked_playlist) {
+            badgeText = `${pl.track_count || 0} favorites`;
             thumbMarkup = `
-              <div class="w-full h-full bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              ${pl.thumbnail ? `<img src="${pl.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">` : ''}
+              <div class="w-full h-full bg-gradient-to-br from-rose-600 to-pink-600 flex items-center justify-center text-white" style="${pl.thumbnail ? 'display:none;' : ''}">
+                <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+              </div>
+            `;
+          } else {
+            // Custom user playlist
+            thumbMarkup = `
+              ${pl.thumbnail ? `<img src="${pl.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">` : ''}
+              <div class="w-full h-full bg-gradient-to-br from-indigo-600/40 to-purple-600/40 flex items-center justify-center text-indigo-300" style="${pl.thumbnail ? 'display:none;' : ''}">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
               </div>
             `;
           }
-        } else if (pl.is_liked_playlist) {
-          badgeText = `${pl.track_count || 0} favorites`;
-          thumbMarkup = `
-            ${pl.thumbnail ? `<img src="${pl.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">` : ''}
-            <div class="w-full h-full bg-gradient-to-br from-rose-600 to-pink-600 flex items-center justify-center text-white" style="${pl.thumbnail ? 'display:none;' : ''}">
-              <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+
+          const card = document.createElement('div');
+          card.className = "glass-card p-2.5 rounded-2xl flex items-center gap-3 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
+          card.onclick = () => openPlaylist(pl.id, true);
+          const badgeElId = pl.is_offline_playlist ? 'id="user-pl-offline-badge-text"' : '';
+          card.innerHTML = `
+            <div class="relative w-14 h-14 rounded-xl overflow-hidden bg-white/5 shrink-0 shadow flex items-center justify-center">
+              ${thumbMarkup}
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="text-sm font-semibold text-white line-clamp-1">${escapeHtml(pl.title || 'Untitled Playlist')}</div>
+              <div ${badgeElId} class="text-xs text-indigo-400 line-clamp-1 mt-0.5">${escapeHtml(badgeText)}</div>
+            </div>
+            <div class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 group-hover:text-emerald-400 group-hover:bg-emerald-500/10 transition shrink-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             </div>
           `;
-        } else {
-          // Custom user playlist
-          thumbMarkup = `
-            ${pl.thumbnail ? `<img src="${pl.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">` : ''}
-            <div class="w-full h-full bg-gradient-to-br from-indigo-600/40 to-purple-600/40 flex items-center justify-center text-indigo-300" style="${pl.thumbnail ? 'display:none;' : ''}">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
-            </div>
-          `;
+          fragment.appendChild(card);
+        } catch (cardErr) {
+          console.warn("Failed to render individual playlist card:", pl, cardErr);
         }
-
-        const card = document.createElement('div');
-        card.className = "glass-card p-2.5 rounded-2xl flex items-center gap-3 hover:bg-white/10 active:scale-[0.98] transition cursor-pointer group";
-        card.onclick = () => openPlaylist(pl.id, true);
-        const badgeElId = pl.is_offline_playlist ? 'id="user-pl-offline-badge-text"' : '';
-        card.innerHTML = `
-          <div class="relative w-14 h-14 rounded-xl overflow-hidden bg-white/5 shrink-0 shadow flex items-center justify-center">
-            ${thumbMarkup}
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="text-sm font-semibold text-white line-clamp-1">${escapeHtml(pl.title)}</div>
-            <div ${badgeElId} class="text-xs text-indigo-400 line-clamp-1 mt-0.5">${escapeHtml(badgeText)}</div>
-          </div>
-          <div class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 group-hover:text-emerald-400 group-hover:bg-emerald-500/10 transition shrink-0">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-          </div>
-        `;
-        fragment.appendChild(card);
       });
 
       // If no custom playlists exist, display helpful empty state
@@ -3082,6 +3080,19 @@
             } else {
               dlBadge.innerText = `${offlineCount} on device`;
             }
+          }
+          if (offlineCount > 0 && typeof SpotiDB.getTracksMetadata === 'function') {
+            SpotiDB.getTracksMetadata().then(meta => {
+              if (currentSeq !== playlistRenderSeq) return;
+              if (meta && meta.length > 0 && meta[0].thumbnail) {
+                const offThumbEl = document.getElementById('user-pl-offline-thumb-img');
+                if (offThumbEl && (!offThumbEl.src || offThumbEl.style.display === 'none')) {
+                  offThumbEl.src = meta[0].thumbnail;
+                  offThumbEl.style.display = 'block';
+                  if (offThumbEl.nextElementSibling) offThumbEl.nextElementSibling.style.display = 'none';
+                }
+              }
+            }).catch(() => {});
           }
         }).catch(() => {});
       }
