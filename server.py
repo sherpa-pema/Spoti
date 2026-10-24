@@ -101,7 +101,7 @@ _RESOLVE_LOCK = threading.Lock()
 # Allow requests from local LAN devices, private subnets (including 172.16/12), and tunnels
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+)(:\d+)?$",
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+|[a-zA-Z0-9.-]+\.duckdns\.org|[a-zA-Z0-9.-]+\.trycloudflare\.com|[a-zA-Z0-9.-]+\.ngrok-free\.(app|dev))(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1074,11 +1074,38 @@ def serve_index():
 
 
 if __name__ == "__main__":
+    import asyncio
     import uvicorn
     local_ip = get_local_ip()
     print("=" * 60, flush=True)
     print("⚡ SPOTI - Private Music Player & Downloader (Mobile PWA)", flush=True)
     print(f"👉 Local Access:   http://localhost:8000", flush=True)
     print(f"📱 Phone on Wi-Fi: http://{local_ip}:8000", flush=True)
-    print("=" * 60, flush=True)
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    ssl_cert = "/var/mobile/server/ssl/hamrospoti.duckdns.org/fullchain.pem"
+    ssl_key = "/var/mobile/server/ssl/hamrospoti.duckdns.org/privkey.pem"
+
+    if os.path.isfile(ssl_cert) and os.path.isfile(ssl_key):
+        print(f"🔒 DuckDNS HTTPS:  https://hamrospoti.duckdns.org (Port 443)", flush=True)
+        print("=" * 60, flush=True)
+
+        async def run_dual_servers():
+            config_http = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="info")
+            server_http = uvicorn.Server(config_http)
+
+            config_https = uvicorn.Config(
+                app,
+                host="0.0.0.0",
+                port=443,
+                ssl_keyfile=ssl_key,
+                ssl_certfile=ssl_cert,
+                log_level="info",
+            )
+            server_https = uvicorn.Server(config_https)
+
+            await asyncio.gather(server_http.serve(), server_https.serve())
+
+        asyncio.run(run_dual_servers())
+    else:
+        print("=" * 60, flush=True)
+        uvicorn.run(app, host="0.0.0.0", port=8000)

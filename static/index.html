@@ -1881,6 +1881,7 @@
           const store = tx.objectStore('tracks');
           const record = {
             id: track.id,
+            original_id: track.original_id || track.id,
             title: track.title || 'Unknown Title',
             artist: track.artist || 'Unknown Artist',
             duration: track.duration || '--:--',
@@ -1904,7 +1905,23 @@
             const tx = db.transaction('tracks', 'readonly');
             const store = tx.objectStore('tracks');
             const req = store.get(id);
-            req.onsuccess = () => resolve(req.result || null);
+            req.onsuccess = () => {
+              if (req.result) return resolve(req.result);
+              // Fallback: match by original_id if query id is an external/PocketBase identifier
+              const cursorReq = store.openCursor();
+              cursorReq.onsuccess = (e) => {
+                const cursor = e.target.result;
+                if (cursor) {
+                  if (cursor.value && (cursor.value.original_id === id || cursor.value.id === id)) {
+                    return resolve(cursor.value);
+                  }
+                  cursor.continue();
+                } else {
+                  resolve(null);
+                }
+              };
+              cursorReq.onerror = () => resolve(null);
+            };
             req.onerror = () => resolve(null);
           });
         } catch (e) {
@@ -2015,13 +2032,20 @@
 
     async function refreshOfflineTrackIds() {
       try {
-        const keys = await SpotiDB.getAllTrackIds();
-        offlineTrackIdSet = new Set(keys);
+        const metadataList = await SpotiDB.getTracksMetadata();
+        const idSet = new Set();
+        metadataList.forEach(t => {
+          if (t.id) idSet.add(t.id);
+          if (t.original_id) idSet.add(t.original_id);
+        });
+        offlineTrackIdSet = idSet;
         const count = await SpotiDB.count();
         const countEl = document.getElementById('offline-songs-count');
         if (countEl) countEl.innerText = count;
+        return idSet;
       } catch (e) {
         offlineTrackIdSet = new Set();
+        return offlineTrackIdSet;
       }
     }
 
@@ -2646,9 +2670,26 @@
                 if (!userPls.some(p => p.id === gp.id)) {
                   userPls.push(gp);
                 }
+                // Queue playlist creation in PocketBase
+                queuePlaylistOp({
+                  op: 'create_playlist',
+                  localId: gp.id,
+                  name: gp.title,
+                  description: gp.description || ''
+                });
+                // Queue all cached tracks for this playlist
+                const cachedTracks = getPlaylistDetailCache(gp.id) || [];
+                for (const tr of cachedTracks) {
+                  queuePlaylistOp({
+                    op: 'add_track',
+                    playlistId: gp.id,
+                    track: tr
+                  });
+                }
               }
               localStorage.setItem(userKey, JSON.stringify(userPls));
               localStorage.removeItem('spoti_user_pl_cache_guest');
+              await syncPendingPlaylistOps();
             }
           }
         } catch (mErr) {
@@ -2954,6 +2995,15 @@
 
       let list = Array.isArray(playlists) ? playlists.filter(p => p && typeof p === 'object') : [];
 
+      // Deduplicate by playlist ID to prevent ghost duplicate cards
+      const seenPlIds = new Set();
+      list = list.filter(p => {
+        if (!p || !p.id) return false;
+        if (seenPlIds.has(p.id)) return false;
+        seenPlIds.add(p.id);
+        return true;
+      });
+
       // Always ensure Downloaded Songs virtual playlist exists, even offline
       if (!list.some(p => p && p.id === 'user_pl_offline_downloads')) {
         list.unshift({
@@ -3188,98 +3238,115 @@
       document.getElementById('create-playlist-modal').classList.add('hidden');
     }
 
+    let isCreatingPlaylist = false;
     async function submitCreatePlaylist() {
-      if (!currentUser) {
-        const cachedUser = localStorage.getItem('spoti_user');
-        if (cachedUser) {
-          try { currentUser = JSON.parse(cachedUser); } catch (e) {}
+      if (isCreatingPlaylist) return;
+      isCreatingPlaylist = true;
+      const submitBtn = document.querySelector("button[onclick='submitCreatePlaylist()']");
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-50', 'pointer-events-none');
+      }
+      try {
+        if (!currentUser) {
+          const cachedUser = localStorage.getItem('spoti_user');
+          if (cachedUser) {
+            try { currentUser = JSON.parse(cachedUser); } catch (e) {}
+          }
+          if (!currentUser) currentUser = { id: 'guest', username: 'Guest' };
         }
-        if (!currentUser) currentUser = { id: 'guest', username: 'Guest' };
-      }
-      const name = document.getElementById('new-pl-name').value.trim();
-      const desc = document.getElementById('new-pl-desc').value.trim();
-      if (!name) {
-        showToast("Please enter a playlist name");
-        return;
-      }
+        const name = document.getElementById('new-pl-name').value.trim();
+        const desc = document.getElementById('new-pl-desc').value.trim();
+        if (!name) {
+          showToast("Please enter a playlist name");
+          return;
+        }
 
-      let createdPl = null;
-      let isOfflineCreated = false;
+        let createdPl = null;
+        let isOfflineCreated = false;
 
-      if (navigator.onLine && localStorage.getItem('spoti_token')) {
-        try {
-          const res = await authFetch('/api/user-playlists', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name, description: desc })
-          });
-          if (res.ok) {
-            createdPl = await res.json();
-            createdPl.is_user_playlist = true;
-            createdPl.is_system = false;
-          } else {
+        if (navigator.onLine && localStorage.getItem('spoti_token')) {
+          try {
+            const res = await authFetch('/api/user-playlists', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: name, description: desc })
+            });
+            if (res.ok) {
+              createdPl = await res.json();
+              createdPl.is_user_playlist = true;
+              createdPl.is_system = false;
+            } else {
+              isOfflineCreated = true;
+            }
+          } catch (e) {
+            console.warn("Online playlist creation failed, creating locally:", e);
             isOfflineCreated = true;
           }
-        } catch (e) {
-          console.warn("Online playlist creation failed, creating locally:", e);
+        } else {
           isOfflineCreated = true;
         }
-      } else {
-        isOfflineCreated = true;
-      }
 
-      if (isOfflineCreated || !createdPl) {
-        const localId = 'pl_local_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
-        createdPl = {
-          id: localId,
-          title: name,
-          description: desc,
-          is_user_playlist: true,
-          is_system: false,
-          is_local: true,
-          track_count: 0,
-          thumbnail: '',
-          tracks: []
-        };
-        const playlists = getLocalPlaylists();
-        playlists.push(createdPl);
-        saveLocalPlaylists(playlists);
-        savePlaylistDetailCache(localId, []);
-        queuePlaylistOp({
-          op: 'create_playlist',
-          localId: localId,
-          name: name,
-          description: desc
-        });
-      } else {
-        const playlists = getLocalPlaylists();
-        const existingIdx = playlists.findIndex(p => p.id === createdPl.id);
-        if (existingIdx >= 0) {
-          playlists[existingIdx] = createdPl;
-        } else {
+        if (isOfflineCreated || !createdPl) {
+          const localId = 'pl_local_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+          createdPl = {
+            id: localId,
+            title: name,
+            description: desc,
+            is_user_playlist: true,
+            is_system: false,
+            is_local: true,
+            track_count: 0,
+            thumbnail: '',
+            tracks: []
+          };
+          const playlists = getLocalPlaylists();
           playlists.push(createdPl);
+          saveLocalPlaylists(playlists);
+          savePlaylistDetailCache(localId, []);
+          queuePlaylistOp({
+            op: 'create_playlist',
+            localId: localId,
+            name: name,
+            description: desc
+          });
+        } else {
+          const playlists = getLocalPlaylists();
+          const existingIdx = playlists.findIndex(p => p.id === createdPl.id);
+          if (existingIdx >= 0) {
+            playlists[existingIdx] = createdPl;
+          } else {
+            playlists.push(createdPl);
+          }
+          saveLocalPlaylists(playlists);
+          savePlaylistDetailCache(createdPl.id, createdPl.tracks || []);
         }
-        saveLocalPlaylists(playlists);
-        savePlaylistDetailCache(createdPl.id, createdPl.tracks || []);
+
+        closeCreatePlaylistModal();
+        showToast(isOfflineCreated ? `Playlist "${createdPl.title}" created (Offline)` : `Playlist "${createdPl.title}" created!`);
+
+        // Immediately navigate to Library tab and Playlists subtab so user sees the new playlist right away
+        switchTab('library');
+        switchLibrarySubtab('playlists', true);
+
+        // Render local cache immediately so the user sees the new playlist with 0ms delay
+        renderUserPlaylistsDOM(getLocalPlaylists());
+
+        // If there was a track waiting to be added, add it immediately
+        if (trackPendingAddToPlaylist) {
+          const pendingTrack = trackPendingAddToPlaylist;
+          trackPendingAddToPlaylist = null;
+          await addTrackToSpecificPlaylist(createdPl.id, pendingTrack, createdPl.title);
+        }
+
+        await loadUserPlaylists();
+      } finally {
+        isCreatingPlaylist = false;
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.classList.remove('opacity-50', 'pointer-events-none');
+        }
       }
-
-      closeCreatePlaylistModal();
-      showToast(isOfflineCreated ? `Playlist "${createdPl.title}" created (Offline)` : `Playlist "${createdPl.title}" created!`);
-
-      // Immediately navigate to Library tab and Playlists subtab so user sees the new playlist right away
-      switchTab('library');
-      switchLibrarySubtab('playlists', true);
-
-      // Render local cache immediately so the user sees the new playlist with 0ms delay
-      renderUserPlaylistsDOM(getLocalPlaylists());
-
-      // If there was a track waiting to be added, add it immediately
-      if (trackPendingAddToPlaylist) {
-        await addTrackToSpecificPlaylist(createdPl.id, trackPendingAddToPlaylist, createdPl.title);
-        trackPendingAddToPlaylist = null;
-      }
-
-      await loadUserPlaylists();
     }
 
     // -------------------------------------------------------------
@@ -3389,7 +3456,13 @@
       }
 
       userPlaylistsCache = playlists;
-      const customPlaylists = playlists.filter(pl => pl.is_user_playlist && !pl.is_system);
+      const seenModalPlIds = new Set();
+      const customPlaylists = playlists.filter(pl => {
+        if (!pl || !pl.id || !pl.is_user_playlist || pl.is_system) return false;
+        if (seenModalPlIds.has(pl.id)) return false;
+        seenModalPlIds.add(pl.id);
+        return true;
+      });
       container.innerHTML = '';
 
       if (customPlaylists.length === 0) {
@@ -3409,7 +3482,7 @@
             </div>
           </div>
           <div class="min-w-0 flex-1">
-            <div class="text-xs font-semibold text-white line-clamp-1">${escapeHtml(pl.title)}</div>
+            <div class="text-xs font-semibold text-white line-clamp-1">${escapeHtml(pl.title)}${pl.description ? `<span class="text-[10px] text-gray-500 font-normal ml-1.5">• ${escapeHtml(pl.description)}</span>` : ''}</div>
             <div class="text-[11px] text-gray-400">${pl.track_count || 0} songs</div>
           </div>
           <span class="text-xs text-emerald-400 font-medium px-2.5 py-1.5 bg-emerald-500/10 rounded-lg flex items-center gap-1.5 border border-emerald-500/20">
@@ -3433,15 +3506,22 @@
           });
         }
 
+        // Clean thumbnail to avoid storing 50KB+ base64 data URIs into localStorage
+        let safeThumb = track.thumbnail || '';
+        if (safeThumb.startsWith('data:') || safeThumb.length > 2000) {
+          safeThumb = track.remote_thumbnail || '';
+        }
+
         // 1. Update local cache immediately
         let cachedTracks = getPlaylistDetailCache(playlistId) || [];
-        if (!cachedTracks.some(t => t.id === track.id)) {
+        if (!cachedTracks.some(t => t.id === track.id || (originalId && t.id === originalId) || (t.original_id && t.original_id === originalId))) {
           cachedTracks.push({
             id: track.id,
+            original_id: originalId,
             title: track.title,
             artist: track.artist,
             duration: track.duration || '',
-            thumbnail: track.thumbnail || '',
+            thumbnail: safeThumb,
             album: track.album || ''
           });
           savePlaylistDetailCache(playlistId, cachedTracks);
@@ -3452,8 +3532,8 @@
         const plIdx = playlists.findIndex(p => p.id === playlistId);
         if (plIdx !== -1) {
           playlists[plIdx].track_count = cachedTracks.length;
-          if (!playlists[plIdx].thumbnail && track.thumbnail) {
-            playlists[plIdx].thumbnail = track.thumbnail;
+          if (!playlists[plIdx].thumbnail && safeThumb) {
+            playlists[plIdx].thumbnail = safeThumb;
           }
           saveLocalPlaylists(playlists);
         }
@@ -3463,7 +3543,7 @@
         // 2. Sync to PocketBase server or queue for sync
         if (navigator.onLine && !playlistId.startsWith('pl_local_') && localStorage.getItem('spoti_token')) {
           try {
-            await authFetch(`/api/user-playlists/${playlistId}/tracks`, {
+            const res = await authFetch(`/api/user-playlists/${playlistId}/tracks`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -3471,31 +3551,36 @@
                 title: track.title,
                 artist: track.artist,
                 duration: track.duration || '',
-                thumbnail: track.thumbnail || '',
+                thumbnail: safeThumb,
                 album: track.album || ''
               })
             });
+            if (!res.ok) {
+              console.warn(`Server rejected track addition (${res.status}), queued for sync`);
+              queuePlaylistOp({ op: 'add_track', playlistId: playlistId, track: { ...track, thumbnail: safeThumb } });
+            }
           } catch (netErr) {
             console.warn("Network error adding track to server, queued:", netErr);
-            queuePlaylistOp({ op: 'add_track', playlistId: playlistId, track: track });
+            queuePlaylistOp({ op: 'add_track', playlistId: playlistId, track: { ...track, thumbnail: safeThumb } });
           }
         } else {
-          queuePlaylistOp({ op: 'add_track', playlistId: playlistId, track: track });
+          queuePlaylistOp({ op: 'add_track', playlistId: playlistId, track: { ...track, thumbnail: safeThumb } });
         }
 
         // 3. Sync to central user library in PocketBase
         syncSingleTrackToLibrary({
           id: ytId || track.id,
+          original_id: originalId,
           title: track.title,
           artist: track.artist,
           duration: track.duration || '',
-          thumbnail: track.thumbnail || '',
+          thumbnail: safeThumb,
           album: track.album || '',
           source: 'playlist'
         });
 
         // 4. Start device IndexedDB download simultaneously if not downloaded
-        downloadSingleTrack(track.id, track.title, track.artist, track.thumbnail, originalId);
+        downloadSingleTrack(track.id, track.title, track.artist, safeThumb, originalId);
         trackPendingAddToPlaylist = null;
         showToast(`Added to ${playlistName}${navigator.onLine ? '' : ' (Offline)'}`);
 
@@ -3515,7 +3600,7 @@
       try {
         // 1. Update local cache immediately
         let cachedTracks = getPlaylistDetailCache(playlistId) || [];
-        cachedTracks = cachedTracks.filter(t => t.id !== trackId);
+        cachedTracks = cachedTracks.filter(t => t.id !== trackId && t.original_id !== trackId);
         savePlaylistDetailCache(playlistId, cachedTracks);
 
         let playlists = getLocalPlaylists();
@@ -3531,11 +3616,14 @@
         // 2. Handle sync
         if (playlistId.startsWith('pl_local_')) {
           let ops = getPendingPlaylistOps();
-          ops = ops.filter(op => !(op.op === 'add_track' && op.playlistId === playlistId && op.track && op.track.id === trackId));
+          ops = ops.filter(op => !(op.op === 'add_track' && op.playlistId === playlistId && op.track && (op.track.id === trackId || op.track.original_id === trackId)));
           savePendingPlaylistOps(ops);
         } else if (navigator.onLine && localStorage.getItem('spoti_token')) {
           try {
-            await authFetch(`/api/user-playlists/${playlistId}/tracks/${trackId}`, { method: 'DELETE' });
+            const delRes = await authFetch(`/api/user-playlists/${playlistId}/tracks/${trackId}`, { method: 'DELETE' });
+            if (!delRes.ok && delRes.status !== 404) {
+              queuePlaylistOp({ op: 'remove_track', playlistId: playlistId, trackId: trackId });
+            }
           } catch (netErr) {
             queuePlaylistOp({ op: 'remove_track', playlistId: playlistId, trackId: trackId });
           }
@@ -4287,7 +4375,28 @@
           const res = await authFetch(`/api/playlist/${playlistId}`);
           if (res.ok) {
             data = await res.json();
-            savePlaylistDetailCache(playlistId, data.tracks || []);
+            const serverTracks = data.tracks || [];
+            const cachedTracks = getPlaylistDetailCache(playlistId) || [];
+
+            // Smart Non-Destructive Merge:
+            // Keep all server tracks, and preserve any locally added/pending tracks that haven't yet reached PocketBase
+            const mergedTracks = [...serverTracks];
+            for (const ct of cachedTracks) {
+              if (ct && (ct.id || ct.original_id)) {
+                const alreadyPresent = mergedTracks.some(st =>
+                  st.id === ct.id ||
+                  (st.original_id && st.original_id === ct.id) ||
+                  (ct.original_id && st.id === ct.original_id) ||
+                  (ct.original_id && st.original_id && st.original_id === ct.original_id) ||
+                  (st.title && ct.title && st.title.toLowerCase() === ct.title.toLowerCase() && st.artist && ct.artist && st.artist.toLowerCase() === ct.artist.toLowerCase())
+                );
+                if (!alreadyPresent) {
+                  mergedTracks.push(ct);
+                }
+              }
+            }
+            data.tracks = mergedTracks;
+            savePlaylistDetailCache(playlistId, mergedTracks);
           } else {
             loadFromCache = true;
           }
@@ -4329,8 +4438,8 @@
       }
 
       data.tracks.forEach((t, i) => {
-        const isDownloaded = offlineTrackIdSet.has(t.id);
-        const isLiked = userLikedTrackIds.has(t.id);
+        const isDownloaded = offlineTrackIdSet.has(t.id) || (t.original_id && offlineTrackIdSet.has(t.original_id));
+        const isLiked = userLikedTrackIds.has(t.id) || (t.original_id && userLikedTrackIds.has(t.original_id));
         const row = document.createElement('div');
         row.className = "glass-card p-2.5 rounded-xl flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer";
         row.onclick = () => playTrackFromList(t, data.tracks);
@@ -5490,14 +5599,9 @@
         if (typeof loadUserPlaylists === 'function') loadUserPlaylists();
 
         // NO AUTO-NAVIGATION: Keep user on current tab (Explore, Search, etc.)
-        // Only refresh playlist tracks if user is ALREADY looking at Downloaded Songs
-        if (activeTab === 'playlist' && activePlaylistId === 'user_pl_offline_downloads') {
-          const trackList = document.getElementById('playlist-tracks-container');
-          if (trackList && typeof renderPlaylistTracks === 'function') {
-            const offlineTracks = await SpotiDB.getTracksMetadata();
-            document.getElementById('pl-desc').innerText = `${offlineTracks.length} tracks saved on this device (offline)`;
-            renderPlaylistTracks(offlineTracks, true);
-          }
+        // If user is currently looking at a playlist view, re-render it so "On Phone" / "On Device" badges update immediately
+        if (activeTab === 'playlist' && activePlaylistId) {
+          openPlaylist(activePlaylistId, true);
         }
       } catch (e) {
         console.error("Download error:", e);

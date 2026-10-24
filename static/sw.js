@@ -1,4 +1,4 @@
-const CACHE_NAME = 'spoti-offline-v30';
+const CACHE_NAME = 'spoti-offline-v31';
 const SHELL_ASSETS = [
   '/',
   '/static/manifest.json',
