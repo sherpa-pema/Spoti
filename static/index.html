@@ -3,16 +3,42 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#0c0d12">
+  <meta name="theme-color" content="#090a10">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>Spoti</title>
   <link rel="manifest" href="/static/manifest.json">
   <link rel="icon" type="image/png" href="/static/icon.png">
   <link rel="apple-touch-icon" href="/static/icon.png">
+  <!-- Google Fonts: Poppins (UI & Body) & Righteous (Headings & Brand) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Righteous&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     :root {
+      /* OLED Dark Mode Token Architecture (ui-ux-pro-max) */
+      --color-primary: #1E1B4B;
+      --color-on-primary: #FFFFFF;
+      --color-secondary: #4338CA;
+      --color-on-secondary: #FFFFFF;
+      --color-accent: #22C55E;
+      --color-accent-hover: #16A34A;
+      --color-on-accent: #090A10;
+      --color-background: #090A10;
+      --color-surface: #141622;
+      --color-surface-hover: #1E2032;
+      --color-foreground: #F8FAFC;
+      --color-card: #151724;
+      --color-card-foreground: #F8FAFC;
+      --color-muted: #242738;
+      --color-text-secondary: #94A3B8;
+      --color-text-muted: #64748B;
+      --color-border: rgba(255, 255, 255, 0.08);
+      --color-border-focus: rgba(34, 197, 94, 0.4);
+      --color-destructive: #EF4444;
+      --color-ring: #22C55E;
+
       --safe-bottom: env(safe-area-inset-bottom, 0px);
       --safe-top: env(safe-area-inset-top, 0px);
       --safe-left: env(safe-area-inset-left, 0px);
@@ -34,10 +60,17 @@
       padding: 0;
       overflow: hidden;
       overscroll-behavior: none;
-      background-color: #0c0d12;
-      color: #f3f4f6;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--color-background);
+      color: var(--color-foreground);
+      font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       -webkit-tap-highlight-color: transparent;
+    }
+    .font-display {
+      font-family: 'Righteous', cursive, sans-serif;
+    }
+    .font-mono-time {
+      font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Roboto Mono', Menlo, monospace;
+      font-feature-settings: 'tnum' on, 'lnum' on;
     }
     .app-header, .app-nav, .app-mini-player, button, input[type="range"] {
       user-select: none;
@@ -52,26 +85,45 @@
     textarea {
       font-size: 16px !important;
     }
+    /* Focus states: WCAG visible focus indicators */
+    button:focus-visible,
+    a:focus-visible,
+    input:focus-visible,
+    select:focus-visible {
+      outline: 2px solid var(--color-ring) !important;
+      outline-offset: 2px !important;
+    }
+    /* Accessible touch target utility (min 44x44px) */
+    .touch-target {
+      min-width: 44px;
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
     .app-header {
       padding-top: max(calc(env(safe-area-inset-top, 0px) + 6px), 12px);
-      background-color: #0c0d12;
+      background-color: rgba(9, 10, 16, 0.95);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--color-border);
     }
     .app-main {
       overscroll-behavior-y: contain;
       -webkit-overflow-scrolling: touch;
-      padding-bottom: calc(56px + max(env(safe-area-inset-bottom, 0px), 10px) + 4rem);
+      padding-bottom: calc(58px + max(env(safe-area-inset-bottom, 0px), 10px) + 4.5rem);
     }
     .app-nav {
       position: fixed;
       bottom: 0;
       left: 0;
       right: 0;
-      height: calc(56px + max(env(safe-area-inset-bottom, 0px), 0px));
+      height: calc(58px + max(env(safe-area-inset-bottom, 0px), 0px));
       padding-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
       box-sizing: border-box;
     }
     .app-mini-player {
-      bottom: calc(56px + max(env(safe-area-inset-bottom, 0px), 0px) + 8px);
+      bottom: calc(58px + max(env(safe-area-inset-bottom, 0px), 0px) + 8px);
     }
     .app-drawer {
       padding-top: max(calc(env(safe-area-inset-top, 0px) + 12px), 20px);
@@ -83,23 +135,25 @@
 
     input[type=range] {
       -webkit-appearance: none;
-      background: rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.15);
       border-radius: 9999px;
-      height: 4px;
+      height: 5px;
       outline: none;
+      cursor: pointer;
     }
     input[type=range]::-webkit-slider-thumb {
       -webkit-appearance: none;
-      width: 14px;
-      height: 14px;
+      width: 16px;
+      height: 16px;
       border-radius: 50%;
-      background: #6366f1;
+      background: var(--color-accent);
       cursor: pointer;
-      box-shadow: 0 0 10px rgba(99, 102, 241, 0.6);
-      transition: transform 0.1s ease;
+      box-shadow: 0 0 12px rgba(34, 197, 94, 0.7);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
     }
     input[type=range]::-webkit-slider-thumb:hover, input[type=range]::-webkit-slider-thumb:active {
       transform: scale(1.3);
+      box-shadow: 0 0 16px rgba(34, 197, 94, 0.95);
     }
     .line-clamp-1 {
       display: -webkit-box;
@@ -114,18 +168,25 @@
       overflow: hidden;
     }
     .glass-nav {
-      background: rgba(18, 19, 26, 0.92);
+      background: rgba(12, 13, 20, 0.94);
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      border-top: 1px solid var(--color-border);
     }
     .glass-card {
-      background: rgba(25, 27, 36, 0.7);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(20, 22, 34, 0.75);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--color-border);
+    }
+    .glass-panel {
+      background: rgba(16, 18, 28, 0.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--color-border);
     }
     #now-playing-drawer {
-      background: radial-gradient(circle at 50% 25%, var(--ambient-glow, rgba(99, 102, 241, 0.28)) 0%, rgba(13, 14, 20, 0.96) 72%), #0d0e14;
+      background: radial-gradient(circle at 50% 25%, var(--ambient-glow, rgba(99, 102, 241, 0.28)) 0%, rgba(9, 10, 16, 0.98) 72%), #090A10;
       transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), background 0.8s ease-in-out;
       touch-action: pan-y;
     }
@@ -134,9 +195,9 @@
       touch-action: pan-y;
     }
     /* 3-Bar Audio Equalizer Animations */
-    @keyframes eq1 { 0%, 100% { height: 3px; } 50% { height: 12px; } }
-    @keyframes eq2 { 0%, 100% { height: 11px; } 50% { height: 4px; } }
-    @keyframes eq3 { 0%, 100% { height: 6px; } 50% { height: 13px; } }
+    @keyframes eq1 { 0%, 100% { height: 3px; } 50% { height: 13px; } }
+    @keyframes eq2 { 0%, 100% { height: 12px; } 50% { height: 4px; } }
+    @keyframes eq3 { 0%, 100% { height: 6px; } 50% { height: 14px; } }
     .spoti-eq-bar-1 { animation: eq1 0.75s ease-in-out infinite; }
     .spoti-eq-bar-2 { animation: eq2 0.6s ease-in-out infinite; }
     .spoti-eq-bar-3 { animation: eq3 0.85s ease-in-out infinite; }
@@ -159,13 +220,29 @@
       line-height: 1.5rem !important;
       font-weight: 700 !important;
       transform: scale(1.03);
-      text-shadow: 0 0 18px rgba(255, 255, 255, 0.45);
+      text-shadow: 0 0 18px rgba(34, 197, 94, 0.45);
       opacity: 1 !important;
     }
     .lyric-line-inactive {
-      color: rgba(255, 255, 255, 0.38);
+      color: var(--color-text-secondary);
       font-size: 0.95rem;
       font-weight: 500;
+    }
+
+    /* Prefers-reduced-motion accessibility */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+      .spoti-eq-bar-1, .spoti-eq-bar-2, .spoti-eq-bar-3 {
+        animation: none !important;
+      }
+      .animate-pulse, .animate-spin, .animate-bounce {
+        animation: none !important;
+      }
     }
   </style>
 </head>
@@ -174,38 +251,48 @@
   <!-- ============================================================ -->
   <!-- 1. Top Header -->
   <!-- ============================================================ -->
-  <header class="app-header px-5 pb-2 flex items-center justify-between z-10 shrink-0">
+  <header class="app-header px-4 pb-2.5 flex items-center justify-between z-10 shrink-0">
     <div class="flex items-center gap-2.5">
-      <img src="/static/icon.png" class="w-8 h-8 rounded-lg shadow-md shadow-black/40" alt="Logo">
-      <span class="font-bold text-lg tracking-tight text-white">
-        Spoti
+      <img src="/static/icon.png" class="w-8 h-8 rounded-lg shadow-md shadow-black/50 border border-white/10" alt="Logo">
+      <div class="flex items-center gap-1.5">
+        <span class="font-display text-xl tracking-wide text-white drop-shadow-sm">
+          Spoti
+        </span>
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#22c55e]"></span>
+      </div>
+      <span id="offline-badge" class="hidden text-[10px] font-semibold text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/30 flex items-center gap-1">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        Offline
       </span>
-      <span id="offline-badge" class="hidden text-[10px] font-semibold text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30">Offline</span>
     </div>
     <div class="flex items-center gap-2">
-      <!-- User Profile / Login Button -->
+      <!-- User Profile / Login Button (44px touch target) -->
       <div class="relative">
-        <button id="user-profile-btn" onclick="toggleUserDropdown()" class="px-2.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 transition text-xs font-medium text-gray-200 flex items-center gap-1.5 border border-white/10">
-          <span id="user-avatar-icon">👤</span>
-          <span id="user-name-display">Login</span>
+        <button id="user-profile-btn" onclick="toggleUserDropdown()" class="touch-target h-11 px-3.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 transition text-xs font-medium text-gray-200 flex items-center gap-2 border border-white/10" aria-label="User Profile">
+          <span id="user-avatar-icon" class="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-emerald-400">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          </span>
+          <span id="user-name-display" class="font-medium max-w-[80px] sm:max-w-[120px] truncate">Login</span>
         </button>
 
         <!-- User Dropdown Menu -->
-        <div id="user-dropdown-menu" class="hidden absolute right-0 mt-2 w-48 rounded-2xl bg-[#161a26] border border-white/10 shadow-2xl p-1.5 text-xs z-50">
-          <div id="user-status-header" class="px-3 py-2 border-b border-white/10 text-gray-400">
-            Signed in as <b id="dropdown-username" class="text-white block truncate">Guest</b>
+        <div id="user-dropdown-menu" class="hidden absolute right-0 mt-2 w-52 rounded-2xl bg-[#141622] border border-white/10 shadow-2xl p-1.5 text-xs z-50 backdrop-blur-xl">
+          <div id="user-status-header" class="px-3.5 py-2.5 border-b border-white/10 text-gray-400">
+            Signed in as <b id="dropdown-username" class="text-white block truncate font-semibold">Guest</b>
           </div>
-          <button onclick="openAuthModal('register')" class="w-full text-left px-3 py-2 rounded-xl hover:bg-white/10 text-gray-200 flex items-center gap-2 transition">
-            <span>➕</span> Switch / New Profile
+          <button onclick="openAuthModal('register')" class="w-full text-left px-3.5 py-2.5 rounded-xl hover:bg-white/10 text-gray-200 flex items-center gap-2.5 transition min-h-[44px]">
+            <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
+            <span>Switch / New Profile</span>
           </button>
-          <button onclick="handleLogout()" class="w-full text-left px-3 py-2 rounded-xl hover:bg-red-500/20 text-red-400 flex items-center gap-2 transition">
-            <span>🚪</span> Log Out
+          <button onclick="handleLogout()" class="w-full text-left px-3.5 py-2.5 rounded-xl hover:bg-red-500/20 text-red-400 flex items-center gap-2.5 transition min-h-[44px]">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+            <span>Log Out</span>
           </button>
         </div>
       </div>
 
-      <!-- QR code button to connect phone -->
-      <button onclick="openQrModal()" class="p-2 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 transition text-gray-300" title="Connect Phone via Wi-Fi">
+      <!-- QR code button to connect phone (44px touch target) -->
+      <button onclick="openQrModal()" class="touch-target w-11 h-11 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 transition text-gray-300 border border-white/10" title="Connect Phone via Wi-Fi" aria-label="Connect Phone via QR Code">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
         </svg>
@@ -216,19 +303,34 @@
   <!-- ============================================================ -->
   <!-- 2. Main Scrollable Container (Tabs) -->
   <!-- ============================================================ -->
-  <main id="main-content" class="app-main flex-1 overflow-y-auto px-4 pt-1">
+  <main id="main-content" class="app-main flex-1 overflow-y-auto px-4 pt-2">
     
     <!-- TAB: HOME / EXPLORE -->
     <section id="tab-home" class="space-y-6">
+      <!-- Ambient Greeting Card -->
+      <div class="glass-card p-4 rounded-2xl flex items-center justify-between border border-white/10 bg-gradient-to-r from-[#141622] via-[#161928] to-[#141622]">
+        <div>
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-emerald-400 font-mono">Audio Streamer</div>
+          <h1 id="home-greeting-heading" class="text-base font-bold text-white tracking-tight mt-0.5">Welcome to Spoti</h1>
+          <p class="text-xs text-gray-400 mt-0.5">Curated music powered by PocketBase & YouTube</p>
+        </div>
+        <div class="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+        </div>
+      </div>
+
       <!-- 1. Trending Now [iTunes + Deezer] -->
       <div>
         <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-bold text-white flex items-center gap-2">
-            <span>🔥</span> Trending Now
+          <h2 class="text-base font-bold text-white flex items-center gap-2">
+            <span class="w-6 h-6 rounded-lg bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0">
+              <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M12.395 2.553a1 1 0 00-1.45-.385c-.345.23-.614.558-.822.88-.316.492-.533 1.035-.722 1.57-.367 1.035-.615 2.073-.807 3.093l-.004.022c-.15.8-.27 1.565-.41 2.23a9.015 9.015 0 01-1.332-1.74 1 1 0 00-1.78.887 11.01 11.01 0 002.392 3.197c.07.06.14.12.213.176a7.502 7.502 0 0011.016-6.495c0-1.33-.357-2.617-.996-3.73a1 1 0 00-.73-.483 1 1 0 00-.77.168 8.01 8.01 0 01-3.89 1.83z" clip-rule="evenodd"/></svg>
+            </span>
+            <span>Trending Now</span>
           </h2>
           <div class="flex items-center gap-2">
             <span id="explore-last-updated" class="text-[11px] text-gray-400 font-normal"></span>
-            <button onclick="loadTrending(true)" class="text-xs text-indigo-400 hover:text-indigo-300 font-medium px-2 py-0.5 rounded-md hover:bg-white/5 active:scale-95 transition flex items-center gap-1" title="Refresh charts from source">
+            <button onclick="loadTrending(true)" class="touch-target h-10 px-3 text-xs text-indigo-400 hover:text-indigo-300 font-medium rounded-xl hover:bg-white/5 active:scale-95 transition flex items-center gap-1.5 border border-white/5" title="Refresh charts from source" aria-label="Refresh charts">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
               <span>Refresh</span>
             </button>
@@ -240,9 +342,9 @@
           <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
           <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
         </div>
-        <!-- View More Button for Trending -->
+        <!-- View More Button for Trending (44px touch target) -->
         <div id="trending-view-more-wrap" class="mt-3.5 flex justify-center hidden">
-          <button id="trending-view-more-btn" onclick="expandTrending()" class="px-5 py-2.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 border border-white/10 text-xs font-semibold text-gray-300 hover:text-white transition flex items-center gap-2 shadow-sm">
+          <button id="trending-view-more-btn" onclick="expandTrending()" class="touch-target h-11 px-6 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 border border-white/10 text-xs font-semibold text-gray-200 hover:text-white transition flex items-center gap-2 shadow-sm" aria-label="View more trending tracks">
             <span>View More</span>
             <span id="trending-count-badge" class="text-[10px] bg-white/10 px-2 py-0.5 rounded-full text-indigo-300 font-mono">10 / 94</span>
           </button>
@@ -252,8 +354,11 @@
       <!-- 2. Billboard Hot 100 -->
       <div>
         <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-bold text-white flex items-center gap-2">
-            <span>🏆</span> Billboard Hot 100
+          <h2 class="text-base font-bold text-white flex items-center gap-2">
+            <span class="w-6 h-6 rounded-lg bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/></svg>
+            </span>
+            <span>Billboard Hot 100</span>
           </h2>
           <span class="text-[11px] font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/25 px-2.5 py-0.5 rounded-full">Official Chart</span>
         </div>
@@ -263,9 +368,9 @@
           <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
           <div class="h-16 rounded-2xl bg-white/5 animate-pulse"></div>
         </div>
-        <!-- View More Button for Billboard -->
+        <!-- View More Button for Billboard (44px touch target) -->
         <div id="billboard-view-more-wrap" class="mt-3.5 flex justify-center hidden">
-          <button id="billboard-view-more-btn" onclick="expandBillboard()" class="px-5 py-2.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 border border-white/10 text-xs font-semibold text-gray-300 hover:text-white transition flex items-center gap-2 shadow-sm">
+          <button id="billboard-view-more-btn" onclick="expandBillboard()" class="touch-target h-11 px-6 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 border border-white/10 text-xs font-semibold text-gray-200 hover:text-white transition flex items-center gap-2 shadow-sm" aria-label="View more billboard tracks">
             <span>View More</span>
             <span id="billboard-count-badge" class="text-[10px] bg-white/10 px-2 py-0.5 rounded-full text-amber-300 font-mono">10 / 100</span>
           </button>
@@ -275,8 +380,11 @@
       <!-- 3. New Releases -->
       <div>
         <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-bold text-white flex items-center gap-2">
-            <span>✨</span> New Releases
+          <h2 class="text-base font-bold text-white flex items-center gap-2">
+            <span class="w-6 h-6 rounded-lg bg-indigo-500/15 text-indigo-400 flex items-center justify-center shrink-0">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
+            </span>
+            <span>New Releases</span>
           </h2>
           <span class="text-xs text-gray-400">Fresh hits & albums</span>
         </div>
@@ -291,8 +399,11 @@
       <!-- 4. Genres / Moods [YouTube Music] -->
       <div>
         <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-bold text-white flex items-center gap-2">
-            <span>🎧</span> Genres & Moods
+          <h2 class="text-base font-bold text-white flex items-center gap-2">
+            <span class="w-6 h-6 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z"/></svg>
+            </span>
+            <span>Genres & Moods</span>
           </h2>
           <span class="text-xs text-gray-400">YouTube Music curated</span>
         </div>
@@ -307,7 +418,10 @@
         <div id="genre-tracks-drawer" class="mt-4 p-4 rounded-3xl glass-panel border border-white/10 hidden">
           <div class="flex items-center justify-between mb-3">
             <h3 id="genre-drawer-title" class="text-base font-bold text-white flex items-center gap-2"></h3>
-            <button onclick="closeGenreDrawer()" class="text-xs px-2.5 py-1 rounded-full bg-white/10 text-gray-300 hover:text-white transition">Close ✕</button>
+            <button onclick="closeGenreDrawer()" class="touch-target h-10 px-3.5 rounded-full bg-white/10 text-gray-200 hover:text-white transition flex items-center gap-1.5 text-xs font-medium" aria-label="Close genre drawer">
+              <span>Close</span>
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
           </div>
           <div id="genre-tracks-list" class="space-y-2"></div>
         </div>
@@ -321,7 +435,7 @@
           type="search" 
           id="search-input" 
           placeholder="Search songs, artists, playlists..." 
-          class="w-full bg-white/10 text-white placeholder-gray-400 px-4 py-3 pl-11 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 transition text-base"
+          class="w-full bg-[#141622] text-white placeholder-gray-400 px-4 py-3.5 pl-11 rounded-2xl outline-none focus:ring-2 focus:ring-emerald-500 border border-white/10 transition text-base"
           onkeydown="handleSearchKeydown(event)"
           oninput="onSearchInput(this.value)"
           onblur="resetViewportScroll()"
@@ -332,17 +446,17 @@
         </svg>
 
         <!-- Dropdown Suggestions Container -->
-        <div id="search-suggestions-dropdown" class="hidden absolute left-0 right-0 top-full mt-1.5 bg-[#161a26]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-40 max-h-64 overflow-y-auto divide-y divide-white/5">
+        <div id="search-suggestions-dropdown" class="hidden absolute left-0 right-0 top-full mt-1.5 bg-[#141622]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-40 max-h-64 overflow-y-auto divide-y divide-white/5">
         </div>
       </div>
 
       <div class="flex gap-2 text-xs">
-        <button onclick="setSearchFilter('songs')" id="filter-songs" class="px-3.5 py-1.5 rounded-full bg-indigo-600 text-white font-medium transition">Songs</button>
-        <button onclick="setSearchFilter('playlists')" id="filter-playlists" class="px-3.5 py-1.5 rounded-full bg-white/10 text-gray-300 font-medium transition">Playlists</button>
+        <button onclick="setSearchFilter('songs')" id="filter-songs" class="touch-target h-11 px-5 rounded-full bg-emerald-600 text-white font-semibold transition shadow-md shadow-emerald-600/20" aria-label="Filter by Songs">Songs</button>
+        <button onclick="setSearchFilter('playlists')" id="filter-playlists" class="touch-target h-11 px-5 rounded-full bg-white/10 text-gray-300 font-medium transition hover:bg-white/15" aria-label="Filter by Playlists">Playlists</button>
       </div>
 
       <div id="search-results" class="space-y-2.5 pt-1">
-        <div class="text-center py-16 text-gray-500 text-sm">Type a song or artist name above to search</div>
+        <div class="text-center py-16 text-gray-400 text-sm">Type a song or artist name above to search</div>
       </div>
     </section>
 
@@ -351,24 +465,27 @@
       <!-- Library Header with "+ New Playlist" -->
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-lg font-bold text-white flex items-center gap-2">
-            <span>📚</span> Your Library
+          <h2 class="text-base font-bold text-white flex items-center gap-2">
+            <span class="w-6 h-6 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+            </span>
+            <span>Your Library</span>
           </h2>
-          <p class="text-xs text-gray-400">Playlists & offline music</p>
+          <p class="text-xs text-gray-400 mt-0.5">Playlists & offline music</p>
         </div>
-        <!-- Create Playlist Trigger Button -->
-        <button onclick="openCreatePlaylistModal()" class="text-xs bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 active:scale-95 transition">
+        <!-- Create Playlist Trigger Button (44px touch target) -->
+        <button onclick="openCreatePlaylistModal()" class="touch-target h-11 px-4 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl flex items-center gap-2 shadow-lg shadow-emerald-600/30 active:scale-95 transition" aria-label="Create New Playlist">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
           <span>New Playlist</span>
         </button>
       </div>
 
-      <!-- Subtabs: Playlists vs Downloaded -->
+      <!-- Subtabs: Playlists vs Downloaded (44px touch targets) -->
       <div class="flex gap-2 text-xs border-b border-white/10 pb-2">
-        <button id="lib-subtab-playlists" onclick="switchLibrarySubtab('playlists')" class="px-3.5 py-1.5 rounded-xl bg-white/10 text-white font-medium transition">
+        <button id="lib-subtab-playlists" onclick="switchLibrarySubtab('playlists')" class="touch-target h-11 px-4 rounded-xl bg-white/10 text-white font-semibold transition" aria-label="View Playlists">
           Playlists (<span id="user-pl-count">0</span>)
         </button>
-        <button id="lib-subtab-offline" onclick="switchLibrarySubtab('offline')" class="px-3.5 py-1.5 rounded-xl text-gray-400 hover:text-white transition">
+        <button id="lib-subtab-offline" onclick="switchLibrarySubtab('offline')" class="touch-target h-11 px-4 rounded-xl text-gray-400 hover:text-white transition" aria-label="View Downloaded Songs">
           Downloaded Songs (<span id="offline-songs-count">0</span>)
         </button>
       </div>
@@ -390,35 +507,36 @@
 
     <!-- TAB: PLAYLIST DETAIL VIEW (DYNAMIC FOR YOUTUBE & CUSTOM USER PLAYLISTS) -->
     <section id="tab-playlist" class="space-y-4 hidden">
-      <button onclick="switchTab(activePlaylistIsUser ? 'library' : 'home')" class="text-xs text-indigo-400 flex items-center gap-1">
+      <button onclick="switchTab(activePlaylistIsUser ? 'library' : 'home')" class="touch-target h-11 px-3 text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5 transition font-medium" aria-label="Back to previous list">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-        Back
+        <span>Back</span>
       </button>
 
-      <div class="flex items-center gap-4 bg-white/5 p-4 rounded-2xl relative">
+      <div class="flex items-center gap-4 bg-white/5 p-4 rounded-2xl relative border border-white/5">
         <div class="relative w-20 h-20 rounded-xl overflow-hidden bg-white/5 shrink-0 shadow flex items-center justify-center">
           <img id="pl-cover" class="w-full h-full object-cover" src="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="Cover">
-          <div class="w-full h-full bg-gradient-to-br from-indigo-600/40 to-purple-600/40 flex items-center justify-center text-indigo-300" style="display:none;">
+          <div class="w-full h-full bg-gradient-to-br from-emerald-600/40 to-indigo-600/40 flex items-center justify-center text-emerald-300" style="display:none;">
             <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
           </div>
         </div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2">
             <h2 id="pl-title" class="font-bold text-base text-white line-clamp-1">Playlist</h2>
-            <span id="pl-custom-badge" class="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-md font-medium hidden">Custom</span>
+            <span id="pl-custom-badge" class="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-md font-medium hidden">Custom</span>
           </div>
           <p id="pl-desc" class="text-xs text-gray-400 line-clamp-2 mt-0.5"></p>
           
           <div class="flex items-center gap-2 mt-2.5">
-            <button id="pl-play-all-btn" onclick="playEntirePlaylist()" class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
+            <button id="pl-play-all-btn" onclick="playEntirePlaylist()" class="touch-target h-11 px-4 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl flex items-center gap-1.5 transition shadow-lg shadow-emerald-600/30" aria-label="Play all tracks">
               <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
               <span>Play All</span>
             </button>
-            <button id="pl-download-all-btn" onclick="downloadAllPlaylistTracks()" class="text-xs bg-white/10 hover:bg-white/15 text-gray-200 font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition">
-              <span>⬇️</span> Download All
+            <button id="pl-download-all-btn" onclick="downloadAllPlaylistTracks()" class="touch-target h-11 px-4 text-xs bg-white/10 hover:bg-white/15 text-gray-200 font-medium rounded-xl flex items-center gap-2 transition border border-white/5" aria-label="Download all tracks in playlist">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              <span>Download All</span>
             </button>
-            <!-- Delete Button for User Custom Playlists -->
-            <button id="pl-delete-btn" onclick="deleteCurrentCustomPlaylist()" class="text-xs text-red-400 hover:text-red-300 p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 ml-auto hidden" title="Delete Playlist">
+            <!-- Delete Button for User Custom Playlists (44px touch target) -->
+            <button id="pl-delete-btn" onclick="deleteCurrentCustomPlaylist()" class="touch-target w-11 h-11 text-xs text-red-400 hover:text-red-300 rounded-xl bg-red-500/10 hover:bg-red-500/20 ml-auto hidden transition" title="Delete Playlist" aria-label="Delete Playlist">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
             </button>
           </div>
@@ -436,27 +554,27 @@
   <!-- 3. Sticky Bottom Mini-Player Bar -->
   <!-- ============================================================ -->
   <div id="mini-player" class="app-mini-player fixed left-0 right-0 px-3 z-30 hidden" onclick="openNowPlayingDrawer()">
-    <div class="glass-card relative overflow-hidden bg-[#161822]/95 border border-white/10 rounded-2xl p-2.5 flex items-center justify-between shadow-2xl shadow-black/80 transition-all duration-300">
-      <!-- Hairline Micro-Progress Bar -->
-      <div id="mini-progress-bar" class="absolute top-0 left-0 h-[2.5px] bg-indigo-500 rounded-full transition-all duration-200 pointer-events-none w-0"></div>
+    <div class="glass-card relative overflow-hidden bg-[#141622]/95 border border-white/10 rounded-2xl p-2.5 flex items-center justify-between shadow-2xl shadow-black/80 transition-all duration-300">
+      <!-- Hairline Micro-Progress Bar (Electric Green) -->
+      <div id="mini-progress-bar" class="absolute top-0 left-0 h-[2.5px] bg-emerald-500 rounded-full transition-all duration-200 pointer-events-none w-0 shadow-[0_0_8px_#22c55e]"></div>
       <div class="flex items-center gap-3 min-w-0 flex-1">
-        <img id="mini-thumb" src="" class="w-11 h-11 rounded-lg object-cover shadow" alt="art">
+        <img id="mini-thumb" src="" class="w-11 h-11 rounded-xl object-cover shadow border border-white/5" alt="art">
         <div class="min-w-0 flex-1">
           <div id="mini-title" class="text-sm font-semibold text-white line-clamp-1">Song Title</div>
           <div id="mini-artist" class="text-xs text-gray-400 line-clamp-1">Artist Name</div>
         </div>
       </div>
       <div class="flex items-center gap-1 sm:gap-2" onclick="event.stopPropagation()">
-        <!-- Previous Track -->
-        <button id="mini-prev-btn" onclick="playPrev()" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 active:scale-90 flex items-center justify-center text-white transition shrink-0" title="Previous Track">
+        <!-- Previous Track (44px touch target) -->
+        <button id="mini-prev-btn" onclick="playPrev()" class="touch-target w-11 h-11 rounded-full bg-white/5 hover:bg-white/15 active:scale-90 flex items-center justify-center text-white transition shrink-0" title="Previous Track" aria-label="Previous Track">
           <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
         </button>
-        <!-- Play / Pause -->
-        <button id="mini-play-btn" onclick="togglePlayPause()" class="w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 active:scale-95 flex items-center justify-center text-white shadow-lg shadow-indigo-600/30 transition shrink-0" title="Play/Pause">
+        <!-- Play / Pause (44px touch target) -->
+        <button id="mini-play-btn" onclick="togglePlayPause()" class="touch-target w-11 h-11 rounded-full bg-emerald-600 hover:bg-emerald-500 active:scale-95 flex items-center justify-center text-white shadow-lg shadow-emerald-600/30 transition shrink-0" title="Play/Pause" aria-label="Play or Pause">
           <svg id="mini-play-icon" class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
         </button>
-        <!-- Next Track -->
-        <button id="mini-next-btn" onclick="playNext()" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 active:scale-90 flex items-center justify-center text-white transition shrink-0" title="Next Track">
+        <!-- Next Track (44px touch target) -->
+        <button id="mini-next-btn" onclick="playNext()" class="touch-target w-11 h-11 rounded-full bg-white/5 hover:bg-white/15 active:scale-90 flex items-center justify-center text-white transition shrink-0" title="Next Track" aria-label="Next Track">
           <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
         </button>
       </div>
@@ -467,15 +585,15 @@
   <!-- 4. Mobile Bottom Navigation -->
   <!-- ============================================================ -->
   <nav class="app-nav fixed bottom-0 left-0 right-0 glass-nav z-20 flex justify-around items-center px-4 text-xs">
-    <button onclick="switchTab('home')" id="nav-home" class="flex flex-col items-center gap-1 text-indigo-400 transition">
+    <button onclick="switchTab('home')" id="nav-home" class="touch-target h-12 flex-1 flex flex-col items-center justify-center gap-1 text-emerald-400 font-semibold transition" aria-label="Explore Tab">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
       <span>Explore</span>
     </button>
-    <button onclick="switchTab('search')" id="nav-search" class="flex flex-col items-center gap-1 text-gray-400 hover:text-white transition">
+    <button onclick="switchTab('search')" id="nav-search" class="touch-target h-12 flex-1 flex flex-col items-center justify-center gap-1 text-gray-400 hover:text-white transition" aria-label="Search Tab">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
       <span>Search</span>
     </button>
-    <button onclick="switchTab('library')" id="nav-library" class="flex flex-col items-center gap-1 text-gray-400 hover:text-white transition">
+    <button onclick="switchTab('library')" id="nav-library" class="touch-target h-12 flex-1 flex flex-col items-center justify-center gap-1 text-gray-400 hover:text-white transition" aria-label="Library Tab">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
       <span>Library</span>
     </button>
@@ -484,26 +602,28 @@
   <!-- ============================================================ -->
   <!-- 5. Full-Screen Now Playing Drawer / Sheet -->
   <!-- ============================================================ -->
-  <div id="now-playing-drawer" class="app-drawer fixed inset-0 bg-[#0d0e14] z-50 flex flex-col justify-between px-6 transform translate-y-full overflow-y-auto">
-    <!-- Tactile Sheet Grab Handle -->
-    <div id="drawer-grab-handle" onclick="closeNowPlayingDrawer()" class="w-12 h-1.5 bg-white/25 hover:bg-white/45 active:bg-white/60 rounded-full mx-auto -mt-2 mb-2 cursor-grab shrink-0 transition" title="Swipe or tap down to close"></div>
+  <div id="now-playing-drawer" class="app-drawer fixed inset-0 bg-[#090A10] z-50 flex flex-col justify-between px-6 transform translate-y-full overflow-y-auto">
+    <!-- Tactile Sheet Grab Handle (44px touch container) -->
+    <div class="touch-target h-10 w-full flex items-center justify-center cursor-grab shrink-0" onclick="closeNowPlayingDrawer()" aria-label="Swipe or tap down to close">
+      <div id="drawer-grab-handle" class="w-12 h-1.5 bg-white/25 hover:bg-white/45 active:bg-white/60 rounded-full transition"></div>
+    </div>
 
     <div class="flex items-center justify-between shrink-0">
-      <button onclick="closeNowPlayingDrawer()" class="p-2 text-gray-400 hover:text-white rounded-full bg-white/5">
+      <button onclick="closeNowPlayingDrawer()" class="touch-target w-11 h-11 text-gray-400 hover:text-white rounded-full bg-white/5 active:scale-95 transition" aria-label="Close now playing drawer">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </button>
       <div class="text-center">
-        <div class="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">Playing From</div>
-        <div id="drawer-source-label" class="text-xs text-indigo-400 font-medium">YouTube Music</div>
+        <div class="text-[11px] uppercase tracking-wider text-gray-400 font-semibold font-mono">Playing From</div>
+        <div id="drawer-source-label" class="text-xs text-emerald-400 font-medium">YouTube Music</div>
       </div>
       <div class="flex items-center gap-1">
-        <button id="drawer-like-btn" onclick="toggleLikeCurrentTrack()" class="p-2 text-gray-400 hover:text-red-400 rounded-full bg-white/5" title="Like Song">
+        <button id="drawer-like-btn" onclick="toggleLikeCurrentTrack()" class="touch-target w-11 h-11 text-gray-400 hover:text-red-400 rounded-full bg-white/5 active:scale-95 transition" title="Like Song" aria-label="Like current track">
           <svg id="drawer-like-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
         </button>
-        <button id="drawer-download-btn" onclick="promptDownloadTrack(currentTrack)" class="p-2 text-gray-400 hover:text-white rounded-full bg-white/5" title="Download / Add to Playlist">
+        <button id="drawer-download-btn" onclick="promptDownloadTrack(currentTrack)" class="touch-target w-11 h-11 text-gray-400 hover:text-white rounded-full bg-white/5 active:scale-95 transition" title="Download / Add to Playlist" aria-label="Download song">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
         </button>
-        <button onclick="if(currentTrack) openTrackContextMenu(currentTrack)" class="p-2 text-gray-400 hover:text-white rounded-full bg-white/5" title="More options">
+        <button onclick="if(currentTrack) openTrackContextMenu(currentTrack)" class="touch-target w-11 h-11 text-gray-400 hover:text-white rounded-full bg-white/5 active:scale-95 transition" title="More options" aria-label="Track options menu">
           <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
         </button>
       </div>
@@ -513,7 +633,7 @@
     <div id="drawer-center-view" class="my-auto relative flex flex-col items-center justify-center py-2 w-full">
       <!-- Center Album Cover (Swipe Left/Right to Skip) -->
       <div id="drawer-thumb-wrap" class="relative w-64 h-64 sm:w-80 sm:h-80 max-w-[85vw] max-h-[85vw] cursor-grab select-none transition-all duration-300">
-        <img id="drawer-thumb" class="w-full h-full object-cover rounded-3xl shadow-2xl shadow-indigo-900/40 border border-white/10" src="" alt="Album Art">
+        <img id="drawer-thumb" class="w-full h-full object-cover rounded-3xl shadow-2xl shadow-emerald-950/40 border border-white/10" src="" alt="Album Art">
       </div>
 
       <!-- Karaoke / Synced Lyrics View (Initially Hidden) -->
@@ -535,48 +655,48 @@
 
       <!-- Scrubber Bar -->
       <div class="space-y-1.5">
-        <input type="range" id="seek-slider" min="0" max="100" value="0" class="w-full" oninput="onSeekInput()" onchange="onSeekChange()">
-        <div class="flex justify-between text-xs text-gray-400 font-mono">
+        <input type="range" id="seek-slider" min="0" max="100" value="0" class="w-full" oninput="onSeekInput()" onchange="onSeekChange()" aria-label="Audio scrubber slider">
+        <div class="flex justify-between text-xs text-gray-400 font-mono-time">
           <span id="current-time">0:00</span>
           <span id="total-duration">0:00</span>
         </div>
       </div>
 
       <!-- Playback Buttons -->
-      <div class="flex items-center justify-between px-4">
-        <button id="shuffle-btn" onclick="toggleShuffle()" class="text-gray-400 hover:text-white p-2">
+      <div class="flex items-center justify-between px-2">
+        <button id="shuffle-btn" onclick="toggleShuffle()" class="touch-target w-11 h-11 text-gray-400 hover:text-white rounded-full transition" aria-label="Shuffle playback">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
         </button>
-        <button onclick="playPrev()" class="text-gray-200 hover:text-white p-2 active:scale-90 transition">
+        <button onclick="playPrev()" class="touch-target w-12 h-12 text-gray-200 hover:text-white active:scale-90 transition rounded-full" aria-label="Previous track">
           <svg class="w-7 h-7 fill-current" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
         </button>
-        <button id="drawer-play-btn" onclick="togglePlayPause()" class="w-16 h-16 rounded-full bg-gradient-to-tr from-indigo-600 to-purple-600 hover:scale-105 active:scale-95 transition flex items-center justify-center text-white shadow-xl shadow-indigo-600/40">
+        <button id="drawer-play-btn" onclick="togglePlayPause()" class="touch-target w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-400 hover:scale-105 active:scale-95 transition flex items-center justify-center text-black shadow-xl shadow-emerald-500/30" aria-label="Play or Pause">
           <svg id="drawer-play-icon" class="w-8 h-8 fill-current ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
         </button>
-        <button onclick="playNext()" class="text-gray-200 hover:text-white p-2 active:scale-90 transition">
+        <button onclick="playNext()" class="touch-target w-12 h-12 text-gray-200 hover:text-white active:scale-90 transition rounded-full" aria-label="Next track">
           <svg class="w-7 h-7 fill-current" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
         </button>
-        <button id="repeat-btn" onclick="toggleRepeat()" class="text-gray-400 hover:text-white p-2">
+        <button id="repeat-btn" onclick="toggleRepeat()" class="touch-target w-11 h-11 text-gray-400 hover:text-white rounded-full transition" aria-label="Repeat mode">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
         </button>
       </div>
 
       <!-- Minimalist Quick Utilities: Lyrics Toggle | Sleep Timer | Playback Speed -->
       <div class="flex items-center justify-center gap-2 pt-1 pb-1">
-        <!-- Lyrics Toggle Button -->
-        <button id="toggle-lyrics-btn" onclick="toggleLyricsView()" class="px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1.5 transition border border-white/5" title="Toggle Karaoke / Lyrics View">
+        <!-- Lyrics Toggle Button (44px touch target) -->
+        <button id="toggle-lyrics-btn" onclick="toggleLyricsView()" class="touch-target h-11 px-4 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-2 transition border border-white/5" title="Toggle Karaoke / Lyrics View" aria-label="Toggle Lyrics View">
           <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
           <span id="lyrics-btn-label">Lyrics</span>
         </button>
 
-        <!-- Sleep Timer Button -->
-        <button id="sleep-timer-btn" onclick="openSleepTimerModal()" class="px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1.5 transition border border-white/5" title="Set Sleep Timer">
+        <!-- Sleep Timer Button (44px touch target) -->
+        <button id="sleep-timer-btn" onclick="openSleepTimerModal()" class="touch-target h-11 px-4 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-2 transition border border-white/5" title="Set Sleep Timer" aria-label="Set Sleep Timer">
           <svg class="w-3.5 h-3.5 fill-none stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           <span id="sleep-timer-label">Timer</span>
         </button>
 
-        <!-- Playback Speed Button -->
-        <button id="playback-speed-btn" onclick="cyclePlaybackSpeed()" class="px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1 transition border border-white/5" title="Playback Speed">
+        <!-- Playback Speed Button (44px touch target) -->
+        <button id="playback-speed-btn" onclick="cyclePlaybackSpeed()" class="touch-target h-11 px-4 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1.5 transition border border-white/5" title="Playback Speed" aria-label="Cycle Playback Speed">
           <span id="speed-label">1.0x</span>
         </button>
       </div>
@@ -585,12 +705,12 @@
       <div class="pt-3 pb-6 border-t border-white/5 space-y-2">
         <div class="flex items-center justify-between text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">
           <span class="flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+            <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
             <span>Up Next</span>
           </span>
           <div class="flex items-center gap-2">
-            <span id="queue-count" class="text-indigo-400 font-mono text-[11px]"></span>
-            <button onclick="clearUpcomingQueue()" class="text-[11px] text-red-400/80 hover:text-red-300 capitalize font-medium transition hover:underline">clear</button>
+            <span id="queue-count" class="text-emerald-400 font-mono-time text-[11px]"></span>
+            <button onclick="clearUpcomingQueue()" class="touch-target h-9 px-2.5 text-[11px] text-red-400/90 hover:text-red-300 capitalize font-medium transition hover:underline" aria-label="Clear upcoming queue">clear</button>
           </div>
         </div>
         <div id="drawer-queue-container" class="max-h-72 sm:max-h-96 overflow-y-auto space-y-2 pr-1"></div>
@@ -601,69 +721,84 @@
   <!-- ============================================================ -->
   <!-- Sleep Timer Modal -->
   <!-- ============================================================ -->
-  <div id="sleep-timer-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 hidden" onclick="closeSleepTimerModal()">
-    <div class="bg-[#181924] border border-white/10 rounded-t-3xl sm:rounded-3xl p-5 max-w-sm w-full space-y-3.5" onclick="event.stopPropagation()">
+  <div id="sleep-timer-modal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 hidden" onclick="closeSleepTimerModal()">
+    <div class="bg-[#141622] border border-white/10 rounded-t-3xl sm:rounded-3xl p-5 max-w-sm w-full space-y-3.5" onclick="event.stopPropagation()">
       <div class="flex items-center justify-between pb-1 border-b border-white/5">
         <div class="flex items-center gap-2">
-          <span class="text-base">🌙</span>
+          <span class="w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-400 flex items-center justify-center">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+          </span>
           <h3 class="text-sm font-bold text-white">Sleep Timer</h3>
         </div>
-        <button onclick="closeSleepTimerModal()" class="p-1.5 text-gray-400 hover:text-white rounded-full bg-white/5">
+        <button onclick="closeSleepTimerModal()" class="touch-target w-11 h-11 text-gray-400 hover:text-white rounded-full bg-white/5 active:scale-95 transition" aria-label="Close sleep timer modal">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
 
       <div class="space-y-1.5 text-xs font-medium">
-        <button onclick="setSleepTimer(0)" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition">
+        <button onclick="setSleepTimer(0)" class="touch-target w-full h-11 px-3.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition" aria-label="Turn off sleep timer">
           <span>Turn Off</span>
-          <span id="timer-check-0" class="text-indigo-400 font-bold hidden">✓</span>
+          <span id="timer-check-0" class="text-emerald-400 font-bold hidden">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+          </span>
         </button>
-        <button onclick="setSleepTimer(15)" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition">
+        <button onclick="setSleepTimer(15)" class="touch-target w-full h-11 px-3.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition" aria-label="Set sleep timer for 15 minutes">
           <span>15 Minutes</span>
-          <span id="timer-check-15" class="text-indigo-400 font-bold hidden">✓</span>
+          <span id="timer-check-15" class="text-emerald-400 font-bold hidden">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+          </span>
         </button>
-        <button onclick="setSleepTimer(30)" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition">
+        <button onclick="setSleepTimer(30)" class="touch-target w-full h-11 px-3.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition" aria-label="Set sleep timer for 30 minutes">
           <span>30 Minutes</span>
-          <span id="timer-check-30" class="text-indigo-400 font-bold hidden">✓</span>
+          <span id="timer-check-30" class="text-emerald-400 font-bold hidden">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+          </span>
         </button>
-        <button onclick="setSleepTimer(45)" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition">
+        <button onclick="setSleepTimer(45)" class="touch-target w-full h-11 px-3.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition" aria-label="Set sleep timer for 45 minutes">
           <span>45 Minutes</span>
-          <span id="timer-check-45" class="text-indigo-400 font-bold hidden">✓</span>
+          <span id="timer-check-45" class="text-emerald-400 font-bold hidden">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+          </span>
         </button>
-        <button onclick="setSleepTimer(60)" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition">
+        <button onclick="setSleepTimer(60)" class="touch-target w-full h-11 px-3.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition" aria-label="Set sleep timer for 1 hour">
           <span>1 Hour</span>
-          <span id="timer-check-60" class="text-indigo-400 font-bold hidden">✓</span>
+          <span id="timer-check-60" class="text-emerald-400 font-bold hidden">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+          </span>
         </button>
-        <button onclick="setSleepTimer('track')" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition">
+        <button onclick="setSleepTimer('track')" class="touch-target w-full h-11 px-3.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-gray-300 flex items-center justify-between transition" aria-label="Set sleep timer for end of current song">
           <span>End of Current Track</span>
-          <span id="timer-check-track" class="text-indigo-400 font-bold hidden">✓</span>
+          <span id="timer-check-track" class="text-emerald-400 font-bold hidden">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+          </span>
         </button>
       </div>
     </div>
   </div>
-
   <!-- ============================================================ -->
   <!-- Track Context Menu Modal (Play Next, Add to Queue, Share) -->
   <!-- ============================================================ -->
-  <div id="track-context-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 hidden" onclick="closeTrackContextMenu()">
-    <div class="bg-[#181924] border border-white/10 rounded-t-3xl sm:rounded-3xl p-5 max-w-sm w-full space-y-3.5 transition-transform" onclick="event.stopPropagation()">
+  <div id="track-context-modal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 hidden" onclick="closeTrackContextMenu()">
+    <div class="bg-[#141622] border border-white/10 rounded-t-3xl sm:rounded-3xl p-5 max-w-sm w-full space-y-3.5 transition-transform" onclick="event.stopPropagation()">
       <!-- Track Header -->
       <div class="flex items-center gap-3 pb-3 border-b border-white/5">
-        <img id="ctx-track-thumb" src="" class="w-12 h-12 rounded-xl object-cover bg-white/5 shrink-0 shadow" alt="thumb">
+        <img id="ctx-track-thumb" src="" class="w-12 h-12 rounded-xl object-cover bg-white/5 shrink-0 shadow border border-white/5" alt="thumb">
         <div class="min-w-0 flex-1">
           <div id="ctx-track-title" class="text-sm font-bold text-white line-clamp-1">Track Title</div>
           <div id="ctx-track-artist" class="text-xs text-gray-400 line-clamp-1 mt-0.5">Artist Name</div>
         </div>
-        <button onclick="closeTrackContextMenu()" class="p-1.5 text-gray-400 hover:text-white rounded-full bg-white/5 shrink-0">
+        <button onclick="closeTrackContextMenu()" class="touch-target w-11 h-11 text-gray-400 hover:text-white rounded-full bg-white/5 shrink-0 active:scale-95 transition" aria-label="Close track options modal">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
 
-      <!-- Action Items -->
-      <div class="space-y-1 text-xs font-medium">
+      <!-- Action Items (44px touch targets) -->
+      <div class="space-y-1.5 text-xs font-medium">
         <!-- Play Next -->
-        <button onclick="executeCtxPlayNext()" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] text-left text-gray-200 flex items-center gap-3 transition">
-          <span class="text-base">⏭️</span>
+        <button onclick="executeCtxPlayNext()" class="touch-target w-full h-12 px-3.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] text-left text-gray-200 flex items-center gap-3 transition" aria-label="Play Next">
+          <span class="w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-400 flex items-center justify-center shrink-0">
+            <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+          </span>
           <div class="flex-1">
             <div class="font-semibold text-white">Play Next</div>
             <div class="text-[11px] text-gray-400">Insert directly after currently playing track</div>
@@ -671,8 +806,10 @@
         </button>
 
         <!-- Add to Queue -->
-        <button onclick="executeCtxAddToQueue()" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] text-left text-gray-200 flex items-center gap-3 transition">
-          <span class="text-base">➕</span>
+        <button onclick="executeCtxAddToQueue()" class="touch-target w-full h-12 px-3.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] text-left text-gray-200 flex items-center gap-3 transition" aria-label="Add to Queue">
+          <span class="w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          </span>
           <div class="flex-1">
             <div class="font-semibold text-white">Add to Queue</div>
             <div class="text-[11px] text-gray-400">Append to the end of the upcoming queue</div>
@@ -680,8 +817,10 @@
         </button>
 
         <!-- Download & Playlist -->
-        <button onclick="executeCtxDownloadPlaylist()" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] text-left text-gray-200 flex items-center gap-3 transition">
-          <span class="text-base">⬇️</span>
+        <button onclick="executeCtxDownloadPlaylist()" class="touch-target w-full h-12 px-3.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] text-left text-gray-200 flex items-center gap-3 transition" aria-label="Save to Playlist or Download">
+          <span class="w-7 h-7 rounded-lg bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          </span>
           <div class="flex-1">
             <div class="font-semibold text-white">Save to Playlist / Download</div>
             <div class="text-[11px] text-gray-400">Store on device or add to custom playlists</div>
@@ -689,8 +828,10 @@
         </button>
 
         <!-- Like Toggle -->
-        <button id="ctx-like-btn" onclick="executeCtxToggleLike()" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] text-left text-gray-200 flex items-center gap-3 transition">
-          <span id="ctx-like-icon" class="text-base">❤️</span>
+        <button id="ctx-like-btn" onclick="executeCtxToggleLike()" class="touch-target w-full h-12 px-3.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] text-left text-gray-200 flex items-center gap-3 transition" aria-label="Toggle Like Song">
+          <span id="ctx-like-icon" class="w-7 h-7 rounded-lg bg-rose-500/15 text-rose-400 flex items-center justify-center shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+          </span>
           <div class="flex-1">
             <div id="ctx-like-label" class="font-semibold text-white">Like Song</div>
             <div class="text-[11px] text-gray-400">Save to your private Liked Songs collection</div>
@@ -698,8 +839,10 @@
         </button>
 
         <!-- Share -->
-        <button onclick="executeCtxShare()" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] text-left text-gray-200 flex items-center gap-3 transition">
-          <span class="text-base">🔗</span>
+        <button onclick="executeCtxShare()" class="touch-target w-full h-12 px-3.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.98] text-left text-gray-200 flex items-center gap-3 transition" aria-label="Share Song">
+          <span class="w-7 h-7 rounded-lg bg-cyan-500/15 text-cyan-400 flex items-center justify-center shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
+          </span>
           <div class="flex-1">
             <div class="font-semibold text-white">Share Song</div>
             <div class="text-[11px] text-gray-400">Copy song link or share via native apps</div>
@@ -712,22 +855,22 @@
   <!-- ============================================================ -->
   <!-- 6. Phone QR Code Connection Modal -->
   <!-- ============================================================ -->
-  <div id="qr-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden" onclick="closeQrModal()">
-    <div class="bg-[#181924] border border-white/10 rounded-3xl p-6 max-w-sm w-full text-center space-y-4" onclick="event.stopPropagation()">
-      <div class="w-12 h-12 bg-indigo-500/10 text-indigo-400 rounded-full flex items-center justify-center mx-auto">
+  <div id="qr-modal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden" onclick="closeQrModal()">
+    <div class="bg-[#141622] border border-white/10 rounded-3xl p-6 max-w-sm w-full text-center space-y-4" onclick="event.stopPropagation()">
+      <div class="w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center mx-auto border border-emerald-500/20">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
       </div>
       <div>
         <h3 class="text-lg font-bold text-white">Play on Your Phone</h3>
         <p class="text-xs text-gray-400 mt-1">Scan with your phone's camera while on the same Wi-Fi network.</p>
       </div>
-      <div class="flex justify-center p-2 bg-[#121212] rounded-2xl border border-white/5">
+      <div class="flex justify-center p-2 bg-[#090A10] rounded-2xl border border-white/10">
         <img id="qr-img" src="/api/qr" class="w-52 h-52 rounded-xl" alt="QR Code">
       </div>
-      <div id="server-url-display" class="text-xs font-mono text-indigo-300 break-all select-all bg-white/5 p-2 rounded-lg">
+      <div id="server-url-display" class="text-xs font-mono-time text-emerald-300 break-all select-all bg-white/5 p-2 rounded-lg border border-white/5">
         http://...
       </div>
-      <button onclick="closeQrModal()" class="w-full py-2.5 bg-white/10 hover:bg-white/15 text-white text-xs font-medium rounded-xl transition">
+      <button onclick="closeQrModal()" class="touch-target w-full h-11 bg-white/10 hover:bg-white/15 text-white text-xs font-medium rounded-xl transition" aria-label="Close QR Modal">
         Done
       </button>
     </div>
@@ -736,10 +879,10 @@
   <!-- ============================================================ -->
   <!-- 7. Create New Playlist Modal -->
   <!-- ============================================================ -->
-  <div id="create-playlist-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden" onclick="closeCreatePlaylistModal()">
-    <div class="bg-[#181924] border border-white/10 rounded-3xl p-6 max-w-sm w-full space-y-4" onclick="event.stopPropagation()">
+  <div id="create-playlist-modal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden" onclick="closeCreatePlaylistModal()">
+    <div class="bg-[#141622] border border-white/10 rounded-3xl p-6 max-w-sm w-full space-y-4" onclick="event.stopPropagation()">
       <div class="text-center">
-        <div class="w-12 h-12 bg-indigo-500/10 text-indigo-400 rounded-full flex items-center justify-center mx-auto mb-2">
+        <div class="w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-2 border border-emerald-500/20">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
         </div>
         <h3 class="text-lg font-bold text-white">Create New Playlist</h3>
@@ -748,18 +891,18 @@
       <div class="space-y-3">
         <div>
           <label class="text-xs text-gray-400 font-medium block mb-1">Playlist Name</label>
-          <input type="text" id="new-pl-name" placeholder="e.g. Chill Vibes, Workout Mix..." class="w-full bg-white/10 text-white placeholder-gray-500 px-4 py-2.5 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+          <input type="text" id="new-pl-name" placeholder="e.g. Chill Vibes, Workout Mix..." class="w-full h-11 bg-white/5 text-white placeholder-gray-500 px-4 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 border border-white/10 text-sm">
         </div>
         <div>
           <label class="text-xs text-gray-400 font-medium block mb-1">Description (Optional)</label>
-          <input type="text" id="new-pl-desc" placeholder="e.g. Late night coding songs" class="w-full bg-white/10 text-white placeholder-gray-500 px-4 py-2.5 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+          <input type="text" id="new-pl-desc" placeholder="e.g. Late night coding songs" class="w-full h-11 bg-white/5 text-white placeholder-gray-500 px-4 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 border border-white/10 text-sm">
         </div>
       </div>
       <div class="flex gap-2.5 pt-2">
-        <button onclick="closeCreatePlaylistModal()" class="flex-1 py-2.5 bg-white/10 hover:bg-white/15 text-gray-300 text-xs font-medium rounded-xl transition">
+        <button onclick="closeCreatePlaylistModal()" class="touch-target flex-1 h-11 bg-white/10 hover:bg-white/15 text-gray-300 text-xs font-medium rounded-xl transition" aria-label="Cancel playlist creation">
           Cancel
         </button>
-        <button onclick="submitCreatePlaylist()" class="flex-1 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-semibold rounded-xl transition shadow-lg shadow-indigo-600/30">
+        <button onclick="submitCreatePlaylist()" class="touch-target flex-1 h-11 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition shadow-lg shadow-emerald-600/30" aria-label="Confirm create playlist">
           Create
         </button>
       </div>
@@ -767,44 +910,44 @@
   </div>
 
   <!-- ============================================================ -->
-  <!-- 8. Add Track to Playlist Modal -->
-  <!-- ============================================================ -->
   <!-- 8. Download & Save to Playlist Modal -->
   <!-- ============================================================ -->
-  <div id="add-to-playlist-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 hidden" onclick="closeAddToPlaylistModal()">
-    <div class="bg-[#181924] border border-white/10 rounded-t-3xl sm:rounded-3xl p-5 max-w-sm w-full space-y-3.5 max-h-[80vh] flex flex-col" onclick="event.stopPropagation()">
+  <div id="add-to-playlist-modal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 hidden" onclick="closeAddToPlaylistModal()">
+    <div class="bg-[#141622] border border-white/10 rounded-t-3xl sm:rounded-3xl p-5 max-w-sm w-full space-y-3.5 max-h-[80vh] flex flex-col" onclick="event.stopPropagation()">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2.5 min-w-0 pr-2">
-          <div class="w-8 h-8 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center shrink-0">
+          <div class="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/20">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
           </div>
           <div class="min-w-0">
             <h3 class="text-base font-bold text-white leading-tight">Download & Save</h3>
-            <p id="add-modal-song-title" class="text-xs text-indigo-400 line-clamp-1 mt-0.5">Song Name</p>
+            <p id="add-modal-song-title" class="text-xs text-emerald-400 line-clamp-1 mt-0.5 font-medium">Song Name</p>
           </div>
         </div>
-        <button onclick="closeAddToPlaylistModal()" class="p-1.5 text-gray-400 hover:text-white rounded-full bg-white/5 shrink-0">
+        <button onclick="closeAddToPlaylistModal()" class="touch-target w-11 h-11 text-gray-400 hover:text-white rounded-full bg-white/5 shrink-0 active:scale-95 transition" aria-label="Close save to playlist modal">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
 
       <!-- Quick Option: Download directly to Phone (Downloaded Songs) -->
-      <button onclick="confirmQuickDownload()" class="w-full p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-xs font-medium flex items-center justify-between transition active:scale-[0.98]">
-        <div class="flex items-center gap-2">
-          <span>📲</span>
+      <button onclick="confirmQuickDownload()" class="touch-target w-full h-12 px-3.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-xs font-medium flex items-center justify-between transition active:scale-[0.98]" aria-label="Download to Phone Only">
+        <div class="flex items-center gap-2.5">
+          <span class="w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+          </span>
           <span>Download to Phone Only</span>
         </div>
-        <span class="text-[11px] text-indigo-400 font-semibold">Downloaded Songs</span>
+        <span class="text-[11px] text-emerald-400 font-semibold font-mono">Offline</span>
       </button>
 
       <!-- Quick Option: Create New Playlist -->
-      <button onclick="openCreatePlaylistModal(true)" class="w-full p-2.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-medium flex items-center justify-center gap-1.5 transition active:scale-[0.98]">
+      <button onclick="openCreatePlaylistModal(true)" class="touch-target w-full h-12 px-3.5 rounded-xl bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-300 text-xs font-medium flex items-center justify-center gap-2 transition active:scale-[0.98]" aria-label="Create New Playlist and Save">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
         <span>Create New Playlist & Save</span>
       </button>
 
       <!-- Existing Playlists List Header -->
-      <div class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1 pt-1">Or Add to Existing Playlist</div>
+      <div class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1 pt-1 font-mono">Or Add to Existing Playlist</div>
       <div id="add-modal-playlists-list" class="space-y-2 overflow-y-auto flex-1 pr-1">
         <!-- Injected dynamically -->
       </div>
@@ -814,22 +957,22 @@
   <!-- ============================================================ -->
   <!-- 9. Auth Modal (Login & Sign Up) -->
   <!-- ============================================================ -->
-  <div id="auth-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden" onclick="handleAuthBackdrop(event)">
-    <div class="bg-[#181924] border border-white/10 rounded-3xl p-6 max-w-sm w-full space-y-4" onclick="event.stopPropagation()">
+  <div id="auth-modal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden" onclick="handleAuthBackdrop(event)">
+    <div class="bg-[#141622] border border-white/10 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl" onclick="event.stopPropagation()">
       <div class="text-center">
-        <div class="w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-2 text-xl">
-          🎵
+        <div class="w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-2 border border-emerald-500/20 shadow-md">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
         </div>
         <h3 id="auth-modal-title" class="text-lg font-bold text-white">Welcome to Spoti</h3>
         <p id="auth-modal-desc" class="text-xs text-gray-400 mt-0.5">Sign in to your private music profile</p>
       </div>
 
-      <!-- Auth Tabs: Login vs Register -->
+      <!-- Auth Tabs: Login vs Register (44px touch target) -->
       <div class="flex rounded-xl bg-white/5 p-1 text-xs">
-        <button id="auth-tab-login" onclick="switchAuthTab('login')" class="flex-1 py-1.5 rounded-lg bg-emerald-500 text-white font-semibold transition">
+        <button id="auth-tab-login" onclick="switchAuthTab('login')" class="touch-target flex-1 h-11 rounded-lg bg-emerald-500 text-black font-semibold transition" aria-label="Switch to Login Tab">
           Log In
         </button>
-        <button id="auth-tab-register" onclick="switchAuthTab('register')" class="flex-1 py-1.5 rounded-lg text-gray-400 hover:text-white transition">
+        <button id="auth-tab-register" onclick="switchAuthTab('register')" class="touch-target flex-1 h-11 rounded-lg text-gray-400 hover:text-white transition" aria-label="Switch to Register Tab">
           Create Account
         </button>
       </div>
@@ -837,21 +980,21 @@
       <div class="space-y-3">
         <div>
           <label class="text-xs text-gray-400 font-medium block mb-1">Username</label>
-          <input type="text" id="auth-username" placeholder="e.g. alice" autocomplete="username" class="w-full bg-white/10 text-white placeholder-gray-500 px-4 py-2.5 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm" onkeydown="if(event.key==='Enter') document.getElementById('auth-password').focus()">
+          <input type="text" id="auth-username" placeholder="e.g. alice" autocomplete="username" class="w-full h-11 bg-white/5 text-white placeholder-gray-500 px-4 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 border border-white/10 text-sm" onkeydown="if(event.key==='Enter') document.getElementById('auth-password').focus()">
         </div>
         <div>
           <label class="text-xs text-gray-400 font-medium block mb-1">Password</label>
-          <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password" class="w-full bg-white/10 text-white placeholder-gray-500 px-4 py-2.5 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm" onkeydown="if(event.key==='Enter') submitAuth()">
+          <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password" class="w-full h-11 bg-white/5 text-white placeholder-gray-500 px-4 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 border border-white/10 text-sm" onkeydown="if(event.key==='Enter') submitAuth()">
         </div>
       </div>
 
       <div id="auth-error-msg" class="text-xs text-red-400 text-center hidden"></div>
 
-      <div class="flex gap-2 pt-2">
-        <button id="auth-cancel-btn" onclick="closeAuthModal()" class="flex-1 py-2.5 bg-white/10 hover:bg-white/15 text-white text-xs font-medium rounded-xl transition">
+      <div class="flex gap-2.5 pt-2">
+        <button id="auth-cancel-btn" onclick="closeAuthModal()" class="touch-target flex-1 h-11 bg-white/10 hover:bg-white/15 text-white text-xs font-medium rounded-xl transition" aria-label="Cancel authentication">
           Cancel
         </button>
-        <button id="auth-submit-btn" onclick="submitAuth()" class="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-emerald-600/30 transition">
+        <button id="auth-submit-btn" onclick="submitAuth()" class="touch-target flex-1 h-11 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-emerald-600/30 transition" aria-label="Submit login or registration">
           Log In
         </button>
       </div>
@@ -998,7 +1141,9 @@
 
       const isLiked = userLikedTrackIds.has(track.id);
       if (likeIcon && likeLabel) {
-        likeIcon.innerText = isLiked ? '💔' : '❤️';
+        likeIcon.innerHTML = isLiked
+          ? '<svg class="w-4 h-4 text-rose-500 fill-current" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>'
+          : '<svg class="w-4 h-4 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>';
         likeLabel.innerText = isLiked ? 'Remove from Liked Songs' : 'Save to Liked Songs';
       }
 
@@ -1126,7 +1271,7 @@
 
     function renderContextMenuBtnHtml(track) {
       return `
-        <button onclick="event.stopPropagation(); openTrackContextMenu(${escapeTrackObj(track)})" class="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-white/10 active:scale-95 transition shrink-0" title="More options">
+        <button onclick="event.stopPropagation(); openTrackContextMenu(${escapeTrackObj(track)})" class="touch-target w-11 h-11 text-gray-400 hover:text-white rounded-xl hover:bg-white/10 active:scale-95 transition shrink-0" title="More options" aria-label="More options">
           <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
         </button>
       `;
@@ -1147,7 +1292,7 @@
         if (thumbWrap) thumbWrap.classList.add('hidden');
         if (lyricsWrap) lyricsWrap.classList.remove('hidden');
         if (toggleBtn) {
-          toggleBtn.className = "px-3.5 py-1.5 rounded-full bg-indigo-600 text-white font-semibold active:scale-95 text-xs flex items-center gap-1.5 transition shadow-md shadow-indigo-600/30";
+          toggleBtn.className = "touch-target h-11 px-4 rounded-full bg-emerald-600 text-white font-semibold active:scale-95 text-xs flex items-center gap-2 transition shadow-md shadow-emerald-600/30";
         }
         if (currentTrack) {
           loadLyricsForTrack(currentTrack);
@@ -1156,7 +1301,7 @@
         if (thumbWrap) thumbWrap.classList.remove('hidden');
         if (lyricsWrap) lyricsWrap.classList.add('hidden');
         if (toggleBtn) {
-          toggleBtn.className = "px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1.5 transition border border-white/5";
+          toggleBtn.className = "touch-target h-11 px-4 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-2 transition border border-white/5";
         }
       }
     }
@@ -1174,7 +1319,7 @@
       if (scrollEl) {
         scrollEl.innerHTML = `
           <div class="py-16 flex flex-col items-center justify-center gap-2">
-            <div class="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
+            <div class="w-5 h-5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin"></div>
             <span class="text-xs text-gray-400 font-medium">Fetching lyrics...</span>
           </div>
         `;
@@ -1276,9 +1421,11 @@
 
       if (!lyricsData || lyricsData.empty || !lyricsData.lines || lyricsData.lines.length === 0) {
         scrollEl.innerHTML = `
-          <div class="py-16 text-center text-gray-500 text-xs">
-            <span class="text-2xl block mb-2">🎙️</span>
-            No lyrics found for this track.
+          <div class="py-16 text-center text-gray-400 text-xs flex flex-col items-center">
+            <span class="w-10 h-10 rounded-full bg-white/5 text-gray-400 flex items-center justify-center mb-2">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z"/></svg>
+            </span>
+            <span>No synced lyrics found for this track.</span>
           </div>
         `;
         return;
@@ -1385,18 +1532,18 @@
       if (mode === 0) {
         if (timerLabel) timerLabel.innerText = "Timer";
         if (timerBtn) {
-          timerBtn.className = "px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1.5 transition border border-white/5";
+          timerBtn.className = "touch-target h-11 px-4 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-2 transition border border-white/5";
         }
         showToast("Sleep timer turned off");
         return;
       }
 
       if (timerBtn) {
-        timerBtn.className = "px-3.5 py-1.5 rounded-full bg-indigo-600/30 text-indigo-300 font-semibold border border-indigo-500/40 active:scale-95 text-xs flex items-center gap-1.5 transition";
+        timerBtn.className = "touch-target h-11 px-4 rounded-full bg-emerald-600/20 text-emerald-300 font-semibold border border-emerald-500/30 active:scale-95 text-xs flex items-center gap-2 transition";
       }
 
       if (mode === 'track') {
-        if (timerLabel) timerLabel.innerText = "⏱️ End of Song";
+        if (timerLabel) timerLabel.innerText = "End of Song";
         showToast("Sleep timer set for end of current song");
         return;
       }
@@ -1422,9 +1569,9 @@
           sleepTimerMode = 0;
           if (timerLabel) timerLabel.innerText = "Timer";
           if (timerBtn) {
-            timerBtn.className = "px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1.5 transition border border-white/5";
+            timerBtn.className = "touch-target h-11 px-4 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-2 transition border border-white/5";
           }
-          showToast("🌙 Sleep timer ended. Goodnight!");
+          showToast("Sleep timer ended. Goodnight!");
         }
       }, 1000);
     }
@@ -1434,7 +1581,7 @@
       if (!timerLabel) return;
       const mm = Math.floor(sleepTimerRemainingSecs / 60);
       const ss = sleepTimerRemainingSecs % 60;
-      timerLabel.innerText = `⏱️ ${mm}:${ss < 10 ? '0' : ''}${ss}`;
+      timerLabel.innerText = `${mm}:${ss < 10 ? '0' : ''}${ss}`;
     }
 
     // -------------------------------------------------------------
@@ -1460,9 +1607,9 @@
       if (label) label.innerText = `${playbackSpeed}x`;
       if (btn) {
         if (playbackSpeed !== 1.0) {
-          btn.className = "px-3.5 py-1.5 rounded-full bg-indigo-600/30 text-indigo-300 font-bold border border-indigo-500/40 active:scale-95 text-xs flex items-center gap-1 transition";
+          btn.className = "touch-target h-11 px-4 rounded-full bg-emerald-600/20 text-emerald-300 font-bold border border-emerald-500/30 active:scale-95 text-xs flex items-center gap-1.5 transition";
         } else {
-          btn.className = "px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1 transition border border-white/5";
+          btn.className = "touch-target h-11 px-4 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1.5 transition border border-white/5";
         }
       }
     }
@@ -1928,13 +2075,13 @@
       const isDownloaded = offlineTrackIdSet.has(track.id) || (track.yt_id && offlineTrackIdSet.has(track.yt_id));
       if (isDownloaded) {
         return `
-          <div data-dl-btn="${track.id}" ${track.yt_id ? `data-dl-orig="${track.id}" data-dl-btn="${track.yt_id}"` : ''} class="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0" title="Saved to device">
+          <div data-dl-btn="${track.id}" ${track.yt_id ? `data-dl-orig="${track.id}" data-dl-btn="${track.yt_id}"` : ''} class="touch-target w-11 h-11 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0" title="Saved to device">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
           </div>
         `;
       }
       return `
-        <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(track)})" data-dl-btn="${track.id}" class="w-8 h-8 rounded-full bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0 active:scale-95" title="Download / Add to Playlist">
+        <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(track)})" data-dl-btn="${track.id}" class="touch-target w-11 h-11 rounded-full bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0 active:scale-95" title="Download / Add to Playlist">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
         </button>
       `;
@@ -1958,24 +2105,24 @@
 
         if (status === 'completed') {
           el.outerHTML = `
-            <div data-dl-btn="${trackId}" ${origAttr} class="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 transition duration-300 animate-pulse" title="Saved to device">
+            <div data-dl-btn="${trackId}" ${origAttr} class="touch-target w-11 h-11 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 transition duration-300 animate-pulse" title="Saved to device">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
             </div>
           `;
         } else if (status === 'error') {
           el.outerHTML = `
-            <button onclick="event.stopPropagation(); promptDownloadTrack({id: '${trackId}'})" data-dl-btn="${trackId}" ${origAttr} class="w-8 h-8 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center shrink-0 active:scale-95" title="Download failed. Tap to retry.">
+            <button onclick="event.stopPropagation(); promptDownloadTrack({id: '${trackId}'})" data-dl-btn="${trackId}" ${origAttr} class="touch-target w-11 h-11 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center shrink-0 active:scale-95" title="Download failed. Tap to retry.">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
             </button>
           `;
         } else {
           el.outerHTML = `
-            <div data-dl-btn="${trackId}" ${origAttr} class="relative w-8 h-8 flex items-center justify-center shrink-0" title="Downloading ${pct}%">
+            <div data-dl-btn="${trackId}" ${origAttr} class="relative touch-target w-11 h-11 flex items-center justify-center shrink-0" title="Downloading ${pct}%">
               <svg class="w-8 h-8 -rotate-90" viewBox="0 0 36 36">
                 <circle cx="18" cy="18" r="14" fill="none" stroke="currentColor" stroke-width="3" class="text-white/10" />
-                <circle cx="18" cy="18" r="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" class="text-indigo-400 transition-all duration-300" stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" />
+                <circle cx="18" cy="18" r="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" class="text-emerald-400 transition-all duration-300" stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" />
               </svg>
-              <span class="absolute text-[8px] font-bold text-indigo-300 font-mono tracking-tighter">${pct}%</span>
+              <span class="absolute text-[8px] font-bold text-emerald-300 font-mono tracking-tighter">${pct}%</span>
             </div>
           `;
         }
@@ -2288,12 +2435,15 @@
       const dropdownUser = document.getElementById('dropdown-username');
       const avatarIcon = document.getElementById('user-avatar-icon');
 
+      const guestSvg = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>`;
+      const getUserInitialBadge = (u) => `<span class="text-[10px] font-bold uppercase text-emerald-400 leading-none">${(u || 'U').charAt(0)}</span>`;
+
       if (!token) {
         currentUser = null;
         userLikedTrackIds.clear();
         if (nameDisplay) nameDisplay.innerText = "Login";
         if (dropdownUser) dropdownUser.innerText = "Guest (Not logged in)";
-        if (avatarIcon) avatarIcon.innerText = "👤";
+        if (avatarIcon) avatarIcon.innerHTML = guestSvg;
         updateNowPlayingLikeState();
         return false;
       }
@@ -2306,7 +2456,7 @@
           localStorage.setItem('spoti_user', JSON.stringify(currentUser));
           if (nameDisplay) nameDisplay.innerText = currentUser.username;
           if (dropdownUser) dropdownUser.innerText = currentUser.username;
-          if (avatarIcon) avatarIcon.innerText = "🎧";
+          if (avatarIcon) avatarIcon.innerHTML = getUserInitialBadge(currentUser.username);
           await syncUserFavorites();
           return true;
         } else {
@@ -2316,7 +2466,7 @@
           userLikedTrackIds.clear();
           if (nameDisplay) nameDisplay.innerText = "Login";
           if (dropdownUser) dropdownUser.innerText = "Guest (Not logged in)";
-          if (avatarIcon) avatarIcon.innerText = "👤";
+          if (avatarIcon) avatarIcon.innerHTML = guestSvg;
           updateNowPlayingLikeState();
           return false;
         }
@@ -2328,7 +2478,7 @@
             currentUser = JSON.parse(cachedUser);
             if (nameDisplay) nameDisplay.innerText = currentUser.username;
             if (dropdownUser) dropdownUser.innerText = currentUser.username;
-            if (avatarIcon) avatarIcon.innerText = "🎧";
+            if (avatarIcon) avatarIcon.innerHTML = getUserInitialBadge(currentUser.username);
             return true;
           } catch(err) {}
         }
@@ -2519,7 +2669,7 @@
         closeAuthModal();
         await initAuth();
         await loadUserPlaylists();
-        showToast(`✓ Welcome, ${data.username}!`);
+        showToast(`Welcome, ${data.username}!`);
       } catch (e) {
         errEl.innerText = "Connection error. Make sure server is reachable.";
         errEl.classList.remove('hidden');
@@ -2596,7 +2746,7 @@
           });
           if (res.ok) {
             userLikedTrackIds.add(track.id);
-            showToast("Added to Liked Songs ❤️");
+            showToast("Added to Liked Songs");
             updateNowPlayingLikeState();
             if (activePlaylistId === 'user_pl_liked_songs') {
               openPlaylist('user_pl_liked_songs', true);
@@ -2684,13 +2834,13 @@
 
       switchTab('library');
       switchLibrarySubtab('playlists');
-      showToast('⚡ Offline Mode: Playing songs downloaded to your phone');
+      showToast('Offline Mode: Playing songs downloaded to your phone');
     }
 
     function exitOfflineMode() {
       const badge = document.getElementById('offline-badge');
       if (badge) badge.classList.add('hidden');
-      showToast('🌐 Reconnected to server');
+      showToast('Reconnected to server');
       initAuth();
       loadTrending();
       loadUserPlaylists();
@@ -2726,7 +2876,7 @@
 
     function switchTab(tab) {
       if (tab === 'home' && !navigator.onLine) {
-        showToast('⚡ Explore is unavailable offline. Showing your offline library.');
+        showToast('Explore is unavailable offline. Showing your offline library.');
         switchTab('library');
         switchLibrarySubtab('playlists');
         return;
@@ -2861,7 +3011,7 @@
             `;
           }
         } else if (pl.is_liked_playlist) {
-          badgeText = `❤️ ${pl.track_count || 0} favorites`;
+          badgeText = `${pl.track_count || 0} favorites`;
           thumbMarkup = `
             ${pl.thumbnail ? `<img src="${pl.thumbnail}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" alt="pl">` : ''}
             <div class="w-full h-full bg-gradient-to-br from-rose-600 to-pink-600 flex items-center justify-center text-white" style="${pl.thumbnail ? 'display:none;' : ''}">
@@ -2890,7 +3040,9 @@
             <div class="text-sm font-semibold text-white line-clamp-1">${escapeHtml(pl.title)}</div>
             <div ${badgeElId} class="text-xs text-indigo-400 line-clamp-1 mt-0.5">${escapeHtml(badgeText)}</div>
           </div>
-          <span class="text-xs text-gray-400 p-2">▶</span>
+          <div class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 group-hover:text-emerald-400 group-hover:bg-emerald-500/10 transition shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+          </div>
         `;
         fragment.appendChild(card);
       });
@@ -3101,7 +3253,7 @@
       }
 
       closeCreatePlaylistModal();
-      showToast(isOfflineCreated ? `✓ Playlist "${createdPl.title}" created (Offline)` : `✓ Playlist "${createdPl.title}" created!`);
+      showToast(isOfflineCreated ? `Playlist "${createdPl.title}" created (Offline)` : `Playlist "${createdPl.title}" created!`);
 
       // Immediately navigate to Library tab and Playlists subtab so user sees the new playlist right away
       switchTab('library');
@@ -3249,8 +3401,8 @@
             <div class="text-xs font-semibold text-white line-clamp-1">${escapeHtml(pl.title)}</div>
             <div class="text-[11px] text-gray-400">${pl.track_count || 0} songs</div>
           </div>
-          <span class="text-xs text-indigo-400 font-medium px-2 py-1 bg-white/5 rounded-lg flex items-center gap-1">
-            <span>⬇️</span> Save
+          <span class="text-xs text-emerald-400 font-medium px-2.5 py-1.5 bg-emerald-500/10 rounded-lg flex items-center gap-1.5 border border-emerald-500/20">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg> Add
           </span>
         `;
         container.appendChild(row);
@@ -3334,7 +3486,7 @@
         // 4. Start device IndexedDB download simultaneously if not downloaded
         downloadSingleTrack(track.id, track.title, track.artist, track.thumbnail, originalId);
         trackPendingAddToPlaylist = null;
-        showToast(`✓ Added to ${playlistName}${navigator.onLine ? '' : ' (Offline)'}`);
+        showToast(`Added to ${playlistName}${navigator.onLine ? '' : ' (Offline)'}`);
 
         if (activePlaylistId === playlistId) {
           openPlaylist(playlistId, true);
@@ -3472,11 +3624,11 @@
           };
           await playTrackFromList(playItem, listContext, 'explore', item.source || 'Explore');
         } else {
-          showToast('⚠️ Could not match song on YouTube');
+          showToast('Could not match song on YouTube');
         }
       } catch (err) {
         console.error('Resolve error:', err);
-        showToast('⚠️ Error resolving song on YouTube');
+        showToast('Error resolving song on YouTube');
       } finally {
         if (cardElement) {
           cardElement.classList.remove('opacity-75');
@@ -3737,7 +3889,7 @@
 
       drawer.classList.remove('hidden');
       drawer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      titleEl.innerText = `🎧 ${genre.name} — Top Tracks`;
+      titleEl.innerText = `${genre.name} — Top Tracks`;
 
       const tracks = genre.tracks || [];
       if (tracks.length === 0) {
@@ -3958,7 +4110,7 @@
               </div>
               <div class="flex items-center gap-1">
                 <!-- Like -->
-                <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(item)}, event)" class="p-2 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
+                <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(item)}, event)" class="touch-target w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
                   <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
                 </button>
                 <!-- Unified Download / Add to Playlist / Progress Ring -->
@@ -4065,7 +4217,7 @@
 
         trackList.innerHTML = '';
         if (mergedTracks.length === 0) {
-          trackList.innerHTML = '<div class="text-center py-12 text-gray-500 text-xs">No songs in your library yet.<br><span class="text-gray-600 block mt-1">Tap ⬇️ on any song to save it across all your devices.</span></div>';
+          trackList.innerHTML = '<div class="text-center py-12 text-gray-500 text-xs">No songs in your library yet.<br><span class="text-gray-600 block mt-1">Tap the download button on any song to save it across all your devices.</span></div>';
           return;
         }
 
@@ -4076,9 +4228,9 @@
 
           let badgeMarkup = '';
           if (t.isOnDevice) {
-            badgeMarkup = `<span class="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 font-medium">✓ On Device</span>`;
+            badgeMarkup = `<span class="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 font-medium inline-flex items-center gap-1"><svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>On Device</span>`;
           } else {
-            badgeMarkup = `<button onclick="event.stopPropagation(); downloadSingleTrack('${t.id}', '${escapeQuotes(t.title)}', '${escapeQuotes(t.artist || '')}', '${escapeQuotes(t.thumbnail || '')}')" class="text-[10px] text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 px-2 py-0.5 rounded border border-indigo-500/20 font-medium flex items-center gap-1 transition">⬇️ Save Offline</button>`;
+            badgeMarkup = `<button onclick="event.stopPropagation(); downloadSingleTrack('${t.id}', '${escapeQuotes(t.title)}', '${escapeQuotes(t.artist || '')}', '${escapeQuotes(t.thumbnail || '')}')" class="text-[10px] text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 py-1 rounded-full border border-emerald-500/20 font-medium inline-flex items-center gap-1 transition"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Save Offline</button>`;
           }
 
           row.innerHTML = `
@@ -4099,12 +4251,12 @@
             </div>
             <div class="flex items-center gap-1">
               <!-- Add to Playlist -->
-              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(t)})" class="p-2 text-indigo-400 hover:text-indigo-300 active:scale-95 transition" title="Add to Playlist">
+              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(t)})" class="touch-target w-11 h-11 flex items-center justify-center rounded-full text-emerald-400 hover:text-emerald-300 hover:bg-white/5 active:scale-95 transition" title="Add to Playlist">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
               </button>
               ${renderContextMenuBtnHtml(t)}
               <!-- Delete from Library -->
-              <button onclick="event.stopPropagation(); deleteOfflineTrack('${t.id}', '${escapeQuotes(t.title)}')" class="p-2 text-red-400 hover:text-red-300 active:scale-95 transition" title="Delete Track">
+              <button onclick="event.stopPropagation(); deleteOfflineTrack('${t.id}', '${escapeQuotes(t.title)}')" class="touch-target w-11 h-11 flex items-center justify-center rounded-full text-red-400 hover:text-red-300 hover:bg-white/5 active:scale-95 transition" title="Delete Track">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
               </button>
             </div>
@@ -4176,15 +4328,15 @@
         if (isUserPlaylist) {
           // User custom playlist: if downloaded show "On Phone" badge, otherwise offer download button
           actionButtonsHtml = `
-            ${isDownloaded ? '<span class="text-xs text-emerald-400 font-medium px-2 py-0.5 bg-emerald-500/10 rounded-md">On Phone</span>' : renderDownloadBtnHtml(t)}
-            <button onclick="event.stopPropagation(); removeTrackFromCustomPlaylist('${playlistId}', '${t.id}', event)" class="p-2 text-red-400 hover:text-red-300 active:scale-95 transition" title="Remove from Playlist">
+            ${isDownloaded ? '<span class="text-xs text-emerald-400 font-medium px-2.5 py-1 bg-emerald-500/10 rounded-full border border-emerald-500/20">On Phone</span>' : renderDownloadBtnHtml(t)}
+            <button onclick="event.stopPropagation(); removeTrackFromCustomPlaylist('${playlistId}', '${t.id}', event)" class="touch-target w-11 h-11 flex items-center justify-center rounded-full text-red-400 hover:text-red-300 hover:bg-white/5 active:scale-95 transition" title="Remove from Playlist">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
             </button>
           `;
         } else {
           // System / Explore playlist: show like and download
           actionButtonsHtml = `
-            <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(t)}, event)" class="p-1.5 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
+            <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(t)}, event)" class="touch-target w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
               <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
             </button>
             ${renderDownloadBtnHtml(t)}
@@ -4252,7 +4404,9 @@
 
     async function downloadAllPlaylistTracks() {
       const btn = document.getElementById('pl-download-all-btn');
-      btn.innerText = 'Queuing...';
+      const defaultDownloadAllHtml = `<svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg><span>Download All</span>`;
+      const syncedHtml = (label) => `<svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>${label}</span>`;
+      btn.innerHTML = `<span class="inline-block animate-pulse">Queuing...</span>`;
       try {
         if (activePlaylistId === 'user_pl_offline_downloads') {
           let tracks = [];
@@ -4275,12 +4429,12 @@
           }
           if (count === 0) {
             showToast("All library tracks are already saved on this device!");
-            btn.innerText = '✓ All Synced';
+            btn.innerHTML = syncedHtml('All Synced');
           } else {
             showToast(`Downloaded ${count} tracks to this device!`);
-            btn.innerText = `✓ Synced ${count}`;
+            btn.innerHTML = syncedHtml(`Synced ${count}`);
           }
-          setTimeout(() => { btn.innerText = '⬇️ Download All'; }, 3000);
+          setTimeout(() => { btn.innerHTML = defaultDownloadAllHtml; }, 3000);
           return;
         }
         let tracks = [];
@@ -4299,12 +4453,12 @@
             count++;
           }
         }
-        btn.innerText = `✓ Queued ${count}`;
+        btn.innerHTML = syncedHtml(`Queued ${count}`);
         showToast(`Queued ${count} tracks for offline download`);
-        setTimeout(() => { btn.innerText = '⬇️ Download All'; }, 3000);
+        setTimeout(() => { btn.innerHTML = defaultDownloadAllHtml; }, 3000);
       } catch (e) {
         btn.innerText = 'Failed';
-        setTimeout(() => { btn.innerText = '⬇️ Download All'; }, 3000);
+        setTimeout(() => { btn.innerHTML = defaultDownloadAllHtml; }, 3000);
       }
     }
 
@@ -4353,14 +4507,14 @@
               <div class="text-xs text-gray-400 line-clamp-1">${track.artist} • ${track.sizeFormatted || 'Offline'}</div>
             </div>
             <div class="flex items-center gap-1">
-              <span class="text-xs text-emerald-400 font-medium px-2 py-0.5 bg-emerald-500/10 rounded-md">On Phone</span>
+              <span class="text-xs text-emerald-400 font-medium px-2.5 py-1 bg-emerald-500/10 rounded-full border border-emerald-500/20">On Phone</span>
               <!-- Add to Playlist -->
-              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(track)})" class="p-2 text-indigo-400 hover:text-indigo-300 active:scale-95 transition" title="Add to Playlist">
+              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(track)})" class="touch-target w-11 h-11 flex items-center justify-center rounded-full text-emerald-400 hover:text-emerald-300 hover:bg-white/5 active:scale-95 transition" title="Add to Playlist">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
               </button>
               ${renderContextMenuBtnHtml(track)}
               <!-- Delete from Device -->
-              <button onclick="event.stopPropagation(); deleteOfflineTrack('${track.id}', '${escapeQuotes(track.title)}')" class="p-2 text-red-400 hover:text-red-300 active:scale-95 transition" title="Delete from Device">
+              <button onclick="event.stopPropagation(); deleteOfflineTrack('${track.id}', '${escapeQuotes(track.title)}')" class="touch-target w-11 h-11 flex items-center justify-center rounded-full text-red-400 hover:text-red-300 hover:bg-white/5 active:scale-95 transition" title="Delete from Device">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
               </button>
             </div>
@@ -4585,7 +4739,7 @@
         } else {
           // Online stream
           if (!navigator.onLine) {
-            showToast('⚠️ Streaming unavailable while offline. Select a downloaded song.');
+            showToast('Streaming unavailable while offline. Select a downloaded song.');
             isPlaybackBuffering = false;
             updatePlayPauseIcons(false);
             return;
@@ -4852,7 +5006,7 @@
           if (timerBtn) {
             timerBtn.className = "px-3.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10 active:scale-95 text-xs text-gray-300 hover:text-white font-medium flex items-center gap-1.5 transition border border-white/5";
           }
-          showToast("🌙 End of song reached. Goodnight!");
+          showToast("End of song reached. Goodnight!");
           return;
         }
 
@@ -4999,18 +5153,18 @@
       // -------------------------------------------------------------
       if (nextTrack) {
         const nextCard = document.createElement('div');
-        nextCard.className = "mb-3 p-3 rounded-2xl bg-gradient-to-r from-indigo-950/40 via-purple-950/20 to-indigo-950/40 border border-indigo-500/20 shadow-lg shadow-indigo-950/30 flex items-center justify-between gap-3 group";
+        nextCard.className = "mb-3 p-3 rounded-2xl bg-gradient-to-r from-emerald-950/30 via-slate-900/60 to-emerald-950/30 border border-emerald-500/20 shadow-lg shadow-black/40 flex items-center justify-between gap-3 group";
 
-        let badgeText = "▶ Next in Line";
-        let badgeStyle = "bg-indigo-500/20 text-indigo-300 border-indigo-500/30";
+        let badgeText = "Next in Line";
+        let badgeStyle = "bg-white/10 text-gray-300 border-white/10";
         if (nextTrack._source === 'user_queue') {
-          badgeText = "▶ Next (Queued by You)";
+          badgeText = "Next (Queued by You)";
           badgeStyle = "bg-purple-500/20 text-purple-300 border-purple-500/30";
         } else if (nextTrack._source === 'radio') {
-          badgeText = "📻 Next (Radio Autoplay)";
+          badgeText = "Next (Radio Autoplay)";
           badgeStyle = "bg-amber-500/20 text-amber-300 border-amber-500/30";
         } else if (activePlaylistId === 'user_pl_offline_downloads' || nextTrack.isOnDevice || nextTrack.blob) {
-          badgeText = "✓ Next (Downloaded Library)";
+          badgeText = "Next (Downloaded Library)";
           badgeStyle = "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
         }
 
@@ -5026,13 +5180,13 @@
               <div class="flex items-center gap-1.5 mb-0.5">
                 <span class="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${badgeStyle}">${badgeText}</span>
               </div>
-              <div class="text-sm font-semibold text-white line-clamp-1 group-hover:text-indigo-200 transition">${nextTrack.title}</div>
+              <div class="text-sm font-semibold text-white line-clamp-1 group-hover:text-emerald-300 transition">${nextTrack.title}</div>
               <div class="text-xs text-gray-400 line-clamp-1">${nextTrack.artist}</div>
             </div>
           </div>
           <div class="flex items-center gap-1.5 shrink-0 pl-2">
             <span class="text-gray-400 font-mono text-[11px]">${nextTrack.duration || ''}</span>
-            <button onclick="playNext()" class="p-2 text-indigo-400 hover:text-white rounded-full bg-indigo-500/10 hover:bg-indigo-500/25 active:scale-95 transition" title="Skip to this song">
+            <button onclick="playNext()" class="touch-target w-11 h-11 flex items-center justify-center text-emerald-400 hover:text-white rounded-full bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-95 transition" title="Skip to this song">
               <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
             </button>
           </div>
@@ -5061,7 +5215,7 @@
           </div>
           <div class="flex items-center gap-2 pl-2">
             <span class="text-gray-500 font-mono text-[10px]">${item.duration || ''}</span>
-            <button onclick="removeFromQueue(${item._realIdx}, event)" class="p-1 text-gray-500 hover:text-red-400 rounded-lg hover:bg-white/10 transition" title="Remove from queue">
+            <button onclick="removeFromQueue(${item._realIdx}, event)" class="touch-target w-9 h-9 flex items-center justify-center text-gray-500 hover:text-red-400 rounded-lg hover:bg-white/10 transition" title="Remove from queue">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
           </div>
@@ -5089,7 +5243,7 @@
           </div>
           <div class="flex items-center gap-1 pl-2">
             <span class="text-gray-500 font-mono text-[10px] mr-1">${item.duration || ''}</span>
-            <button onclick="event.stopPropagation(); playTrackNext(${escapeTrackObj(item)})" class="p-1 text-indigo-400 hover:text-indigo-200 rounded-lg hover:bg-indigo-500/20 transition flex items-center gap-0.5 text-[10px] font-medium" title="Play next">
+            <button onclick="event.stopPropagation(); playTrackNext(${escapeTrackObj(item)})" class="touch-target h-9 px-2 text-emerald-400 hover:text-emerald-200 rounded-lg hover:bg-emerald-500/20 transition flex items-center gap-1 text-[11px] font-medium" title="Play next">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
             </button>
           </div>
@@ -5149,8 +5303,8 @@
         });
       } else if (!navigator.onLine) {
         const offNote = document.createElement('div');
-        offNote.className = "py-4 text-center text-gray-500 text-[11px]";
-        offNote.innerHTML = "⚡ Offline: Radio recommendations unavailable. Playing songs saved on this device.";
+        offNote.className = "py-4 text-center text-gray-500 text-[11px] flex items-center justify-center gap-1.5";
+        offNote.innerHTML = `<svg class="w-3.5 h-3.5 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg><span>Offline: Radio recommendations unavailable. Playing songs saved on this device.</span>`;
         fragment.appendChild(offNote);
       }
 
@@ -5211,7 +5365,7 @@
       }
 
       if (!navigator.onLine) {
-        showToast('⚠️ Download unavailable while offline.');
+        showToast('Download unavailable while offline.');
         updateDownloadProgressUI(id, 0, 'error', originalId);
         return;
       }
@@ -5337,7 +5491,7 @@
       } catch (e) {
         console.error("Download error:", e);
         updateDownloadProgressUI(id, 0, 'error', originalId);
-        showToast(`⚠️ Download error: ${e.message || 'Failed'}`);
+        showToast(`Download error: ${e.message || 'Failed'}`);
       } finally {
         activeDownloads.delete(id);
         if (originalId) activeDownloads.delete(originalId);
@@ -5353,7 +5507,7 @@
           } catch (e) {}
         }
         await refreshOfflineTrackIds();
-        showToast(`🗑️ Removed "${title}" from library`);
+        showToast(`Removed "${title}" from library`);
         const drawerDlBtn = document.getElementById('drawer-download-btn');
         if (drawerDlBtn && currentTrack && currentTrack.id === id) {
           drawerDlBtn.classList.remove('hidden');
@@ -5368,11 +5522,26 @@
     const deleteLibraryTrack = deleteOfflineTrack;
 
     function showToast(msg) {
+      const existing = document.getElementById('spoti-global-toast');
+      if (existing) existing.remove();
+
       const toast = document.createElement('div');
-      toast.className = "fixed top-5 left-1/2 -translate-x-1/2 bg-indigo-600/90 backdrop-blur-md text-white px-4 py-2 rounded-2xl text-xs font-semibold shadow-2xl z-50 border border-white/10 animate-bounce";
-      toast.innerText = msg;
+      toast.id = 'spoti-global-toast';
+      toast.className = "fixed top-5 left-1/2 -translate-x-1/2 bg-[#141622]/95 backdrop-blur-xl text-white px-4 py-2.5 rounded-full text-xs font-medium shadow-2xl z-50 border border-white/15 flex items-center gap-2.5 transition-all duration-300 transform -translate-y-3 opacity-0 pointer-events-none";
+      toast.innerHTML = `
+        <span class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#22c55e] shrink-0"></span>
+        <span class="truncate max-w-[280px] sm:max-w-md">${msg}</span>
+      `;
       document.body.appendChild(toast);
-      setTimeout(() => { toast.remove(); }, 3500);
+      requestAnimationFrame(() => {
+        toast.classList.remove('-translate-y-3', 'opacity-0');
+        toast.classList.add('translate-y-0', 'opacity-100');
+      });
+      setTimeout(() => {
+        toast.classList.remove('translate-y-0', 'opacity-100');
+        toast.classList.add('-translate-y-3', 'opacity-0');
+        setTimeout(() => { toast.remove(); }, 300);
+      }, 3200);
     }
 
     function openNowPlayingDrawer() {
