@@ -112,7 +112,12 @@ app.add_middleware(
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    # Allow embedding inside Avocado OS desktop environment while protecting against unauthorized clickjacking
+    response.headers["Content-Security-Policy"] = (
+        "frame-ancestors 'self' http://localhost:8888 http://127.0.0.1:8888 "
+        "http://192.168.1.66:8888 http://192.168.1.67:8888 https://hamrospoti.duckdns.org "
+        "http://192.168.1.66:8000 http://192.168.1.67:8000;"
+    )
     if request.url.path.startswith("/api/"):
         if "Cache-Control" not in response.headers:
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -1089,11 +1094,13 @@ if __name__ == "__main__":
         print(f"🔒 DuckDNS HTTPS:  https://hamrospoti.duckdns.org (Port 443)", flush=True)
         print("=" * 60, flush=True)
 
-        async def run_dual_servers():
+        async def run_multi_servers():
+            # 1. Standard HTTP listener for LAN access (port 8000)
             config_http = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="info")
             server_http = uvicorn.Server(config_http)
 
-            config_https = uvicorn.Config(
+            # 2. IPv4 HTTPS listener (port 443)
+            config_https_v4 = uvicorn.Config(
                 app,
                 host="0.0.0.0",
                 port=443,
@@ -1101,11 +1108,26 @@ if __name__ == "__main__":
                 ssl_certfile=ssl_cert,
                 log_level="info",
             )
-            server_https = uvicorn.Server(config_https)
+            server_https_v4 = uvicorn.Server(config_https_v4)
 
-            await asyncio.gather(server_http.serve(), server_https.serve())
+            # 3. IPv6 HTTPS listener (port 443) for global DuckDNS direct connection
+            config_https_v6 = uvicorn.Config(
+                app,
+                host="::",
+                port=443,
+                ssl_keyfile=ssl_key,
+                ssl_certfile=ssl_cert,
+                log_level="info",
+            )
+            server_https_v6 = uvicorn.Server(config_https_v6)
 
-        asyncio.run(run_dual_servers())
+            await asyncio.gather(
+                server_http.serve(),
+                server_https_v4.serve(),
+                server_https_v6.serve(),
+            )
+
+        asyncio.run(run_multi_servers())
     else:
         print("=" * 60, flush=True)
         uvicorn.run(app, host="0.0.0.0", port=8000)

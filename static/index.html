@@ -101,6 +101,71 @@
       align-items: center;
       justify-content: center;
     }
+
+    /* ============================================================ */
+    /* CRITICAL OFFLINE & STRUCTURAL FALLBACK RULES                 */
+    /* Prevents zoom explosion, hidden modals & touch deadlock      */
+    /* even if external Tailwind Play CDN is offline / slow / wiped */
+    /* ============================================================ */
+    .hidden {
+      display: none !important;
+    }
+    .fixed {
+      position: fixed !important;
+    }
+    .inset-0 {
+      top: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      left: 0 !important;
+    }
+    .z-10 { z-index: 10 !important; }
+    .z-20 { z-index: 20 !important; }
+    .z-30 { z-index: 30 !important; }
+    .z-40 { z-index: 40 !important; }
+    .z-50 { z-index: 50 !important; }
+    .w-full { width: 100% !important; }
+    .h-full { height: 100% !important; }
+    .flex { display: flex !important; }
+    .flex-col { flex-direction: column !important; }
+    .flex-1 { flex: 1 1 0% !important; }
+    .items-center { align-items: center !important; }
+    .justify-center { justify-content: center !important; }
+    .justify-between { justify-content: space-between !important; }
+    .transform { transform: translateZ(0); }
+    .translate-y-full {
+      transform: translateY(100%) !important;
+    }
+    
+    /* Ensure SVGs never expand uncontrollably without utility CSS */
+    svg {
+      max-width: 100%;
+      height: auto;
+      flex-shrink: 0;
+    }
+
+    /* Standalone modal overlays fallback */
+    #auth-modal, #sleep-timer-modal, #track-context-modal,
+    #qr-modal, #create-playlist-modal, #add-to-playlist-modal {
+      position: fixed !important;
+      inset: 0 !important;
+      z-index: 50 !important;
+    }
+    #auth-modal.hidden, #sleep-timer-modal.hidden, #track-context-modal.hidden,
+    #qr-modal.hidden, #create-playlist-modal.hidden, #add-to-playlist-modal.hidden {
+      display: none !important;
+    }
+
+    /* Fullscreen Now Playing Drawer fallback */
+    #now-playing-drawer {
+      position: fixed !important;
+      inset: 0 !important;
+      z-index: 50 !important;
+      background-color: #090A10 !important;
+    }
+    #now-playing-drawer.translate-y-full {
+      transform: translateY(100%) !important;
+    }
     .app-header {
       padding-top: max(calc(env(safe-area-inset-top, 0px) + 6px), 12px);
       background-color: rgba(9, 10, 16, 0.95);
@@ -891,11 +956,11 @@
       <div class="space-y-3">
         <div>
           <label class="text-xs text-gray-400 font-medium block mb-1">Playlist Name</label>
-          <input type="text" id="new-pl-name" placeholder="e.g. Chill Vibes, Workout Mix..." class="w-full h-11 bg-white/5 text-white placeholder-gray-500 px-4 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 border border-white/10 text-sm">
+          <input type="text" id="new-pl-name" placeholder="e.g. Chill Vibes, Workout Mix..." class="w-full h-11 bg-white/5 text-white placeholder-gray-500 px-4 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 border border-white/10 text-base">
         </div>
         <div>
           <label class="text-xs text-gray-400 font-medium block mb-1">Description (Optional)</label>
-          <input type="text" id="new-pl-desc" placeholder="e.g. Late night coding songs" class="w-full h-11 bg-white/5 text-white placeholder-gray-500 px-4 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 border border-white/10 text-sm">
+          <input type="text" id="new-pl-desc" placeholder="e.g. Late night coding songs" class="w-full h-11 bg-white/5 text-white placeholder-gray-500 px-4 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 border border-white/10 text-base">
         </div>
       </div>
       <div class="flex gap-2.5 pt-2">
@@ -980,11 +1045,11 @@
       <div class="space-y-3">
         <div>
           <label class="text-xs text-gray-400 font-medium block mb-1">Username</label>
-          <input type="text" id="auth-username" placeholder="e.g. alice" autocomplete="username" class="w-full h-11 bg-white/5 text-white placeholder-gray-500 px-4 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 border border-white/10 text-sm" onkeydown="if(event.key==='Enter') document.getElementById('auth-password').focus()">
+          <input type="text" id="auth-username" placeholder="e.g. alice" autocomplete="username" class="w-full h-11 bg-white/5 text-white placeholder-gray-500 px-4 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 border border-white/10 text-base" onkeydown="if(event.key==='Enter') document.getElementById('auth-password').focus()">
         </div>
         <div>
           <label class="text-xs text-gray-400 font-medium block mb-1">Password</label>
-          <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password" class="w-full h-11 bg-white/5 text-white placeholder-gray-500 px-4 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 border border-white/10 text-sm" onkeydown="if(event.key==='Enter') submitAuth()">
+          <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password" class="w-full h-11 bg-white/5 text-white placeholder-gray-500 px-4 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 border border-white/10 text-base" onkeydown="if(event.key==='Enter') submitAuth()">
         </div>
       </div>
 
@@ -1014,7 +1079,22 @@
         if (document.documentElement) {
           document.documentElement.scrollTop = 0;
         }
+        // If iOS WebKit zoomed the visual viewport, gently restore default scale
+        if (window.visualViewport && window.visualViewport.scale > 1.01) {
+          const metaViewport = document.querySelector('meta[name="viewport"]');
+          if (metaViewport) {
+            metaViewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover');
+          }
+        }
       } catch (e) {}
+    }
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', () => {
+        if (window.visualViewport.scale > 1.05) {
+          resetViewportScroll();
+        }
+      }, { passive: true });
     }
 
     function escapeHtml(str) {
@@ -2159,7 +2239,26 @@
         .catch(err => console.warn('[Spoti SW] Registration failed:', err));
     }
 
-    async function authFetch(url, options = {}) {
+    let lastServerReachableStatus = false;
+    async function isServerReachable(timeoutMs = 1500) {
+      if (!navigator.onLine) {
+        lastServerReachableStatus = false;
+        return false;
+      }
+      try {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), timeoutMs);
+        const res = await fetch('/api/info', { signal: controller.signal, cache: 'no-store' });
+        clearTimeout(tid);
+        lastServerReachableStatus = res.ok;
+        return res.ok;
+      } catch (e) {
+        lastServerReachableStatus = false;
+        return false;
+      }
+    }
+
+    async function authFetch(url, options = {}, timeoutMs = 4000) {
       options.headers = options.headers || {};
       const token = localStorage.getItem('spoti_token');
       if (token) {
@@ -2172,7 +2271,20 @@
       if (!options.cache) {
         options.cache = 'no-store';
       }
-      return await fetch(url, options);
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), timeoutMs);
+      if (options.signal) {
+        options.signal.addEventListener('abort', () => controller.abort());
+      }
+      options.signal = controller.signal;
+      try {
+        const res = await fetch(url, options);
+        clearTimeout(tid);
+        return res;
+      } catch (err) {
+        clearTimeout(tid);
+        throw err;
+      }
     }
 
     function getUserPlaylistCacheKey() {
@@ -2564,18 +2676,23 @@
       const cancelBtn = document.getElementById('auth-cancel-btn');
       if (cancelBtn) {
         if (!currentUser || isAuthStartup) {
-          cancelBtn.innerText = "Explore as Guest";
+          cancelBtn.innerText = (!navigator.onLine || !lastServerReachableStatus) ? "Offline Library" : "Explore as Guest";
         } else {
           cancelBtn.innerText = "Cancel";
         }
       }
 
       document.getElementById('auth-modal').classList.remove('hidden');
-      setTimeout(() => document.getElementById('auth-username').focus(), 100);
+      // Do NOT auto-focus on startup or when offline - prevents iOS WebKit keyboard slide-up & auto-zoom
+      if (!startup && !isAuthStartup && navigator.onLine) {
+        setTimeout(() => {
+          try { document.getElementById('auth-username').focus(); } catch(e) {}
+        }, 100);
+      }
     }
 
     function handleAuthBackdrop(event) {
-      if (!currentUser && isAuthStartup) {
+      if (!currentUser && isAuthStartup && navigator.onLine && lastServerReachableStatus) {
         return;
       }
       closeAuthModal();
@@ -2584,6 +2701,10 @@
     function closeAuthModal() {
       document.getElementById('auth-modal').classList.add('hidden');
       isAuthStartup = false;
+      resetViewportScroll();
+      if (!currentUser && (!navigator.onLine || !lastServerReachableStatus)) {
+        enterOfflineMode();
+      }
     }
 
     function switchAuthTab(mode) {
@@ -2712,7 +2833,12 @@
         await loadUserPlaylists();
         showToast(`Welcome, ${data.username}!`);
       } catch (e) {
-        errEl.innerText = "Connection error. Make sure server is reachable.";
+        console.error("Authentication submission error:", e);
+        if (window.location.hostname === '192.168.1.67') {
+          errEl.innerHTML = `Server IP is now <b>192.168.1.66</b>.<br><a href="http://192.168.1.66:8000" class="underline text-emerald-400 font-semibold">Tap here to switch to http://192.168.1.66:8000</a>`;
+        } else {
+          errEl.innerText = (e && e.message) ? `Connection error (${e.message}). Make sure server is reachable.` : "Connection error. Make sure server is reachable.";
+        }
         errEl.classList.remove('hidden');
       } finally {
         submitBtn.disabled = false;
@@ -2835,16 +2961,25 @@
         navigator.storage.persist().catch(() => {});
       }
 
+      // 1. Wire audio controls, gestures, and UI events early so the app is 100% interactive
+      setupAudioEvents();
+      setupMediaSession();
+      initDrawerGestures();
+      initCoverArtGestures();
+      updatePlaybackSpeedUI();
+
+      // 2. Refresh and index local offline tracks from device storage
       await refreshOfflineTrackIds();
 
-      // Always restore / verify authentication on startup (loads cached spoti_user offline)
-      const loggedIn = await initAuth();
+      // 3. Fast probe for actual server reachability (1.5s timeout)
+      const serverUp = await isServerReachable(1500);
 
-      // Check online connectivity
-      const isOnline = navigator.onLine;
-      if (!isOnline) {
+      if (!serverUp) {
+        // Device is offline OR local server is unreachable
         enterOfflineMode();
       } else {
+        // Server is verified online and reachable
+        const loggedIn = await initAuth();
         migrateOfflineThumbnails();
         if (!loggedIn && navigator.onLine) {
           openAuthModal('login', true);
@@ -2853,12 +2988,6 @@
         loadServerInfo();
         loadUserPlaylists();
       }
-
-      setupAudioEvents();
-      setupMediaSession();
-      initDrawerGestures();
-      initCoverArtGestures();
-      updatePlaybackSpeedUI();
     });
 
     function enterOfflineMode() {
@@ -2874,7 +3003,7 @@
       }
 
       switchTab('library');
-      switchLibrarySubtab('playlists');
+      switchLibrarySubtab('playlists', true);
       showToast('Offline Mode: Playing songs downloaded to your phone');
     }
 
@@ -2882,6 +3011,7 @@
       const badge = document.getElementById('offline-badge');
       if (badge) badge.classList.add('hidden');
       showToast('Reconnected to server');
+      lastServerReachableStatus = true;
       initAuth();
       loadTrending();
       loadUserPlaylists();
@@ -2916,10 +3046,10 @@
     }
 
     function switchTab(tab) {
-      if (tab === 'home' && !navigator.onLine) {
+      if (tab === 'home' && (!navigator.onLine || !lastServerReachableStatus)) {
         showToast('Explore is unavailable offline. Showing your offline library.');
         switchTab('library');
-        switchLibrarySubtab('playlists');
+        switchLibrarySubtab('playlists', true);
         return;
       }
 
@@ -3972,7 +4102,7 @@
         }
 
       } catch (e) {
-        if (!navigator.onLine) {
+        if (!navigator.onLine || !lastServerReachableStatus) {
           enterOfflineMode();
         } else if (trendingContainer) {
           trendingContainer.innerHTML = `<div class="col-span-full py-8 text-center text-gray-400 text-sm">Failed to load explore feed. Tap refresh.</div>`;

@@ -32,7 +32,7 @@ def _load_env():
 
 _load_env()
 
-PB_URL = os.environ.get("POCKETBASE_URL", "http://192.168.1.67:8090")
+PB_URL = os.environ.get("POCKETBASE_URL", "http://127.0.0.1:8090")
 SUPERUSER_EMAIL = os.environ.get("PB_SUPERUSER_EMAIL", "")
 SUPERUSER_PASSWORD = os.environ.get("PB_SUPERUSER_PASSWORD", "")
 
