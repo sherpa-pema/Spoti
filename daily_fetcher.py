@@ -536,35 +536,39 @@ def get_pb_token() -> Optional[str]:
 
 
 def clear_and_bulk_insert_pb(token: str, collection_name: str, records: List[Dict[str, Any]]) -> bool:
-    """Replaces previous daily records with fresh daily records in PocketBase."""
+    """Replaces previous daily records with fresh daily records in PocketBase (inserts new records first, then purges old records)."""
     headers = {"Authorization": token, "Content-Type": "application/json"}
     try:
-        # 1. Fetch existing record IDs to remove stale records
+        # 1. Fetch existing record IDs to remove after inserting new ones
         list_url = f"{PB_URL}/api/collections/{collection_name}/records?page=1&perPage=500"
         req = urllib.request.Request(list_url, headers=headers)
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             items = data.get("items", [])
+            old_item_ids = [item['id'] for item in items if 'id' in item]
 
-        # Delete old records
-        for item in items:
-            del_url = f"{PB_URL}/api/collections/{collection_name}/records/{item['id']}"
-            del_req = urllib.request.Request(del_url, headers=headers, method="DELETE")
-            try:
-                urllib.request.urlopen(del_req, timeout=5)
-            except Exception:
-                pass
-
-        # 2. Insert fresh records
+        # 2. Insert fresh records FIRST so the collection is never empty or partial
         create_url = f"{PB_URL}/api/collections/{collection_name}/records"
+        inserted_count = 0
         for rec in records:
             payload = json.dumps(rec).encode("utf-8")
             c_req = urllib.request.Request(create_url, data=payload, headers=headers)
             try:
                 urllib.request.urlopen(c_req, timeout=5)
+                inserted_count += 1
             except Exception as e:
                 # continue inserting even if single record fails
                 pass
+
+        # 3. Only delete old records after new records are successfully inserted
+        if inserted_count > 0:
+            for old_id in old_item_ids:
+                del_url = f"{PB_URL}/api/collections/{collection_name}/records/{old_id}"
+                del_req = urllib.request.Request(del_url, headers=headers, method="DELETE")
+                try:
+                    urllib.request.urlopen(del_req, timeout=5)
+                except Exception:
+                    pass
 
         print(f"Successfully saved {len(records)} records to PocketBase collection '{collection_name}'")
         return True
@@ -586,6 +590,20 @@ def save_json_fallback(filename: str, data: Any):
             print(f"Saved fallback JSON to: {target}")
         except Exception as e:
             # Skip if primary dir cannot be written (e.g. running on non-iPhone dev host)
+            pass
+
+
+def save_cache_meta(meta: Dict[str, Any]):
+    """Saves cache metadata atomically via .tmp and os.replace to both primary and local directories."""
+    for base_dir in [PRIMARY_DATA_DIR, LOCAL_DATA_DIR]:
+        try:
+            os.makedirs(base_dir, exist_ok=True)
+            cpath = os.path.join(base_dir, ".cache_meta.json")
+            tmp_cpath = f"{cpath}.tmp"
+            with open(tmp_cpath, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+            os.replace(tmp_cpath, cpath)
+        except Exception:
             pass
 
 
@@ -619,52 +637,65 @@ def main():
     print(f"Spoti Daily Fetcher Starting: {time.ctime()}")
     print(f"==========================================")
 
-    # 2. Fetch all 4 sections
-    trending = fetch_trending()
-    billboard_hits = fetch_billboard()
-    new_releases = fetch_new_releases()
-    genres = fetch_genres()
+    # Signal that sync is starting so API callers serve from atomic JSON fallback
+    current_meta = {}
+    for cpath in [CACHE_FILE_PRIMARY, CACHE_FILE_LOCAL]:
+        if os.path.isfile(cpath):
+            try:
+                with open(cpath, "r", encoding="utf-8") as f:
+                    current_meta = json.load(f)
+                break
+            except Exception:
+                pass
+    current_meta["sync_in_progress"] = True
+    save_cache_meta(current_meta)
 
-    # 3. Save to PocketBase
-    pb_success = True
-    token = get_pb_token()
-    if token:
-        print("Connected to PocketBase as superuser.")
-        s1 = clear_and_bulk_insert_pb(token, "trending", trending)
-        s2 = clear_and_bulk_insert_pb(token, "billboard", billboard_hits)
-        s3 = clear_and_bulk_insert_pb(token, "new_releases", new_releases)
-        s4 = clear_and_bulk_insert_pb(token, "genres", genres)
-        pb_success = all([s1, s2, s3, s4])
-    else:
-        print("PocketBase unreachable or login failed. Falling back completely to JSON storage.")
-        pb_success = False
+    try:
+        # 2. Fetch all 4 sections
+        trending = fetch_trending()
+        billboard_hits = fetch_billboard()
+        new_releases = fetch_new_releases()
+        genres = fetch_genres()
 
-    # 4. Save to JSON fallback
-    save_json_fallback("trending.json", trending)
-    save_json_fallback("billboard.json", billboard_hits)
-    save_json_fallback("new_releases.json", new_releases)
-    save_json_fallback("genres.json", genres)
+        # 3. Save to JSON fallback FIRST (atomic and instant)
+        save_json_fallback("trending.json", trending)
+        save_json_fallback("billboard.json", billboard_hits)
+        save_json_fallback("new_releases.json", new_releases)
+        save_json_fallback("genres.json", genres)
 
-    # 5. Update Cache Metadata
-    cache_meta = {
-        "last_fetch": now,
-        "date_str": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "pb_persisted": pb_success,
-        "counts": {
-            "trending": len(trending),
-            "billboard": len(billboard_hits),
-            "new_releases": len(new_releases),
-            "genres": len(genres),
+        # 4. Save to PocketBase (insert new records first, then delete old records)
+        pb_success = True
+        token = get_pb_token()
+        if token:
+            print("Connected to PocketBase as superuser.")
+            s1 = clear_and_bulk_insert_pb(token, "trending", trending)
+            s2 = clear_and_bulk_insert_pb(token, "billboard", billboard_hits)
+            s3 = clear_and_bulk_insert_pb(token, "new_releases", new_releases)
+            s4 = clear_and_bulk_insert_pb(token, "genres", genres)
+            pb_success = all([s1, s2, s3, s4])
+        else:
+            print("PocketBase unreachable or login failed. Falling back completely to JSON storage.")
+            pb_success = False
+
+        # 5. Update Cache Metadata atomically
+        cache_meta = {
+            "last_fetch": now,
+            "date_str": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "pb_persisted": pb_success,
+            "sync_in_progress": False,
+            "counts": {
+                "trending": len(trending),
+                "billboard": len(billboard_hits),
+                "new_releases": len(new_releases),
+                "genres": len(genres),
+            }
         }
-    }
-    for base_dir in [PRIMARY_DATA_DIR, LOCAL_DATA_DIR]:
-        try:
-            os.makedirs(base_dir, exist_ok=True)
-            cpath = os.path.join(base_dir, ".cache_meta.json")
-            with open(cpath, "w", encoding="utf-8") as f:
-                json.dump(cache_meta, f, indent=2)
-        except Exception:
-            pass
+        save_cache_meta(cache_meta)
+    except Exception as e:
+        # Ensure sync_in_progress is reset on unexpected failure
+        current_meta["sync_in_progress"] = False
+        save_cache_meta(current_meta)
+        raise e
 
     print(f"\n==========================================")
     print(f"Daily Fetch Complete!")

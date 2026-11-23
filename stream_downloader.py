@@ -131,6 +131,7 @@ def get_cached_or_local_stream(video_id: str) -> Dict[str, Any]:
                 return {"source": "stream", "url": _STREAM_CACHE[video_id]["url"]}
 
     # As extraction leader: extract fresh audio stream URL via yt-dlp
+    result = None
     try:
         ffmpeg_dir = find_ffmpeg()
         ydl_opts: Dict[str, Any] = {
@@ -175,8 +176,15 @@ def get_cached_or_local_stream(video_id: str) -> Dict[str, Any]:
             if video_id in _IN_FLIGHT_STREAMS:
                 _IN_FLIGHT_STREAMS[video_id].set()
                 _IN_FLIGHT_STREAMS.pop(video_id, None)
-            # Retain result briefly for any immediately trailing waiters
-            threading.Timer(5.0, lambda: _IN_FLIGHT_RESULTS.pop(video_id, None)).start()
+
+            # Retain result briefly for any immediately trailing waiters with identity check under lock
+            def _cleanup_result(target=result):
+                with _IN_FLIGHT_LOCK:
+                    if _IN_FLIGHT_RESULTS.get(video_id) is target:
+                        _IN_FLIGHT_RESULTS.pop(video_id, None)
+
+            if result is not None:
+                threading.Timer(5.0, _cleanup_result).start()
 
 
 def get_local_track_path(video_id: str) -> Optional[str]:
@@ -209,7 +217,7 @@ def cleanup_transient_file(video_id: str):
             print(f"Error removing transient file {file_path}: {e}", file=sys.stderr)
     # Clean up only exact matching video_id files in TRANSIENT_DIR
     if os.path.isdir(TRANSIENT_DIR):
-        pattern = re.compile(rf"^(\[{re.escape(video_id)}\]|{re.escape(video_id)})\.(mp3|m4a|webm|part|webp|jpg)$")
+        pattern = re.compile(rf"(?:\[{re.escape(video_id)}\]|^{re.escape(video_id)})\.(mp3|m4a|webm|part|webp|jpg|png)$")
         for fname in os.listdir(TRANSIENT_DIR):
             if pattern.search(fname):
                 try:
@@ -228,8 +236,17 @@ def download_track(video_id: str, title: str = "", artist: str = "", user_id: Op
     """Spawns background download thread for the song in transient storage."""
     now = time.time()
     with _DOWNLOAD_LOCK:
-        if video_id in DOWNLOAD_STATUS and DOWNLOAD_STATUS[video_id].get("status") in ("downloading", "ready_for_transfer"):
-            return  # Already in progress or ready
+        if video_id in DOWNLOAD_STATUS:
+            item = DOWNLOAD_STATUS[video_id]
+            st = item.get("status")
+            updated = item.get("updated_at", item.get("created_at", 0))
+            # If actively downloading within the last 10 minutes (600s), ignore duplicate trigger
+            if st == "downloading" and (now - updated <= 600):
+                return
+            # If ready and file exists on disk within the last 15 minutes, ignore duplicate trigger
+            if st == "ready_for_transfer" and (now - updated <= 900) and item.get("file_path") and os.path.isfile(item["file_path"]):
+                return
+
         DOWNLOAD_STATUS[video_id] = {
             "status": "downloading",
             "percent": 0.0,
@@ -304,7 +321,7 @@ def _download_worker(video_id: str, title: str, artist: str):
             ydl.download([url])
 
         # Clean up any standalone thumbnail jpgs left behind in TRANSIENT_DIR
-        pattern = re.compile(rf"^(\[{re.escape(video_id)}\]|{re.escape(video_id)})\.(webp|jpg|png)$")
+        pattern = re.compile(rf"(?:\[{re.escape(video_id)}\]|^{re.escape(video_id)})\.(webp|jpg|png)$")
         for fname in os.listdir(TRANSIENT_DIR):
             if pattern.search(fname):
                 try:
@@ -329,6 +346,15 @@ def _download_worker(video_id: str, title: str, artist: str):
                 DOWNLOAD_STATUS[video_id]["updated_at"] = now
     except Exception as e:
         now = time.time()
+        # Clean up any transient or partial files left behind on error
+        if os.path.isdir(TRANSIENT_DIR):
+            pattern = re.compile(rf"(?:\[{re.escape(video_id)}\]|^{re.escape(video_id)})\.(mp3|m4a|webm|part|webp|jpg|png)$")
+            for fname in os.listdir(TRANSIENT_DIR):
+                if pattern.search(fname):
+                    try:
+                        os.remove(os.path.join(TRANSIENT_DIR, fname))
+                    except Exception:
+                        pass
         with _DOWNLOAD_LOCK:
             if video_id in DOWNLOAD_STATUS:
                 DOWNLOAD_STATUS[video_id]["status"] = "error"
@@ -394,11 +420,10 @@ def _transient_janitor_loop():
                             except Exception:
                                 pass
             with _DOWNLOAD_LOCK:
-                # Only reap completed, errored, or transferred downloads older than 15 mins
+                # Reap stale downloads older than 15 mins (including hung/orphaned downloading entries)
                 stale_keys = [
                     vid for vid, info in DOWNLOAD_STATUS.items()
                     if (now - info.get("updated_at", info.get("created_at", 0)) > 900)
-                    and info.get("status") in ("ready_for_transfer", "error", "completed")
                 ]
                 for vid in stale_keys:
                     DOWNLOAD_STATUS.pop(vid, None)

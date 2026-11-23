@@ -1132,7 +1132,10 @@
 
     function escapeQuotes(str) {
       if (!str) return '';
-      return escapeHtml(String(str));
+      return String(str)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/"/g, '&quot;');
     }
 
     function escapeTrackObj(t) {
@@ -1146,8 +1149,58 @@
         thumbnail: sanitizeImageUrl(t.thumbnail),
         album: String(t.album || '')
       };
-      return JSON.stringify(copy).replace(/"/g, '&quot;');
+      return JSON.stringify(copy)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
     }
+
+    // Delegated global click handler for track action buttons using trackRegistry
+    document.addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-action]');
+      if (!btn) return;
+      const action = btn.getAttribute('data-action');
+      const tid = btn.getAttribute('data-track-id');
+      if (!action) return;
+
+      event.stopPropagation();
+
+      const track = tid ? (getTrackFromRegistry(tid) || { id: tid }) : null;
+
+      switch (action) {
+        case 'context-menu':
+          if (track) openTrackContextMenu(track);
+          break;
+        case 'prompt-download':
+          if (track) promptDownloadTrack(track);
+          break;
+        case 'toggle-like':
+          if (track) toggleLikeTrack(track, event);
+          break;
+        case 'save-offline':
+          if (track) downloadSingleTrack(track.id, track.title || '', track.artist || '', track.thumbnail || '');
+          break;
+        case 'add-to-playlist':
+          if (track) promptAddToPlaylist(track);
+          break;
+        case 'delete-offline':
+          if (track) deleteOfflineTrack(track.id, track.title || '');
+          break;
+        case 'remove-from-playlist': {
+          const pid = btn.getAttribute('data-playlist-id');
+          if (pid && tid) removeTrackFromCustomPlaylist(pid, tid, event);
+          break;
+        }
+        case 'remove-from-queue': {
+          const qIdx = parseInt(btn.getAttribute('data-queue-idx'), 10);
+          if (!isNaN(qIdx)) removeFromQueue(qIdx, event);
+          break;
+        }
+        case 'play-next':
+          if (track) playTrackNext(track);
+          break;
+      }
+    });
 
     const audio = document.getElementById('audio-engine');
     const preloadAudio = document.getElementById('spoti-preload-engine');
@@ -1350,8 +1403,10 @@
     }
 
     function renderContextMenuBtnHtml(track) {
+      if (track) registerTrack(track);
+      const tid = track && track.id ? escapeHtml(track.id) : '';
       return `
-        <button onclick="event.stopPropagation(); openTrackContextMenu(${escapeTrackObj(track)})" class="touch-target w-11 h-11 text-gray-400 hover:text-white rounded-xl hover:bg-white/10 active:scale-95 transition shrink-0" title="More options" aria-label="More options">
+        <button data-action="context-menu" data-track-id="${tid}" class="touch-target w-11 h-11 text-gray-400 hover:text-white rounded-xl hover:bg-white/10 active:scale-95 transition shrink-0" title="More options" aria-label="More options">
           <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
         </button>
       `;
@@ -2176,16 +2231,18 @@
     }
 
     function renderDownloadBtnHtml(track) {
+      if (track) registerTrack(track);
+      const tid = escapeHtml(track.id);
       const isDownloaded = offlineTrackIdSet.has(track.id) || (track.yt_id && offlineTrackIdSet.has(track.yt_id));
       if (isDownloaded) {
         return `
-          <div data-dl-btn="${track.id}" ${track.yt_id ? `data-dl-orig="${track.id}" data-dl-btn="${track.yt_id}"` : ''} class="touch-target w-11 h-11 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0" title="Saved to device">
+          <div data-dl-btn="${tid}" ${track.yt_id ? `data-dl-orig="${tid}" data-dl-btn="${escapeHtml(track.yt_id)}"` : ''} class="touch-target w-11 h-11 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0" title="Saved to device">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
           </div>
         `;
       }
       return `
-        <button onclick="event.stopPropagation(); promptDownloadTrack(${escapeTrackObj(track)})" data-dl-btn="${track.id}" class="touch-target w-11 h-11 rounded-full bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0 active:scale-95" title="Download / Add to Playlist">
+        <button data-action="prompt-download" data-track-id="${tid}" data-dl-btn="${tid}" class="touch-target w-11 h-11 rounded-full bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white flex items-center justify-center transition shrink-0 active:scale-95" title="Download / Add to Playlist">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
         </button>
       `;
@@ -2215,7 +2272,7 @@
           `;
         } else if (status === 'error') {
           el.outerHTML = `
-            <button onclick="event.stopPropagation(); promptDownloadTrack({id: '${trackId}'})" data-dl-btn="${trackId}" ${origAttr} class="touch-target w-11 h-11 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center shrink-0 active:scale-95" title="Download failed. Tap to retry.">
+            <button data-action="prompt-download" data-track-id="${escapeHtml(trackId)}" data-dl-btn="${escapeHtml(trackId)}" ${origAttr} class="touch-target w-11 h-11 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center shrink-0 active:scale-95" title="Download failed. Tap to retry.">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
             </button>
           `;
@@ -2466,9 +2523,11 @@
     // -------------------------------------------------------------
     // Central Library Sync Engine (PocketBase user_library)
     // -------------------------------------------------------------
+    const PENDING_LIB_OPS_KEY = 'spoti_pending_lib_ops';
+
     function getPendingLibraryOps() {
       try {
-        return JSON.parse(localStorage.getItem('spoti_pending_lib_ops') || '[]');
+        return JSON.parse(localStorage.getItem(PENDING_LIB_OPS_KEY) || '[]');
       } catch (e) {
         return [];
       }
@@ -2476,7 +2535,7 @@
 
     function savePendingLibraryOps(ops) {
       try {
-        localStorage.setItem('spoti_pending_lib_ops', JSON.stringify(ops));
+        localStorage.setItem(PENDING_LIB_OPS_KEY, JSON.stringify(ops));
       } catch (e) {}
     }
 
@@ -2553,7 +2612,7 @@
     async function initAuth() {
       // Purge any historically malformed ops containing base64 data URIs
       try {
-        const rawOps = localStorage.getItem('spoti_pending_library_ops');
+        const rawOps = localStorage.getItem(PENDING_LIB_OPS_KEY);
         if (rawOps) {
           const ops = JSON.parse(rawOps);
           const sanitized = ops.map(op => {
@@ -2562,8 +2621,10 @@
             }
             return op;
           });
-          localStorage.setItem('spoti_pending_library_ops', JSON.stringify(sanitized));
+          localStorage.setItem(PENDING_LIB_OPS_KEY, JSON.stringify(sanitized));
         }
+        // Purge any stale legacy key
+        localStorage.removeItem('spoti_pending_library_ops');
       } catch (e) {}
 
       const token = localStorage.getItem('spoti_token');
@@ -2834,11 +2895,7 @@
         showToast(`Welcome, ${data.username}!`);
       } catch (e) {
         console.error("Authentication submission error:", e);
-        if (window.location.hostname === '192.168.1.67') {
-          errEl.innerHTML = `Server IP is now <b>192.168.1.66</b>.<br><a href="http://192.168.1.66:8000" class="underline text-emerald-400 font-semibold">Tap here to switch to http://192.168.1.66:8000</a>`;
-        } else {
-          errEl.innerText = (e && e.message) ? `Connection error (${e.message}). Make sure server is reachable.` : "Connection error. Make sure server is reachable.";
-        }
+        errEl.innerText = (e && e.message) ? `Connection error (${e.message}). Make sure server is reachable.` : "Connection error. Make sure server is reachable.";
         errEl.classList.remove('hidden');
       } finally {
         submitBtn.disabled = false;
@@ -3992,7 +4049,7 @@
       if (force) {
         try {
           triggerHaptic('light');
-          await fetch('/api/home/refresh', { method: 'POST' });
+          await authFetch('/api/home/refresh', { method: 'POST' });
         } catch (err) {
           console.warn('Refresh request failed:', err);
         }
@@ -4325,6 +4382,7 @@
             `;
           } else {
             const isLiked = userLikedTrackIds.has(item.id);
+            registerTrack(item);
             row.onclick = () => playTrackFromList(item, [item], 'search', 'Search: ' + item.title);
             row.innerHTML = `
               <div class="relative w-12 h-12 rounded-lg overflow-hidden bg-white/5 shrink-0 flex items-center justify-center">
@@ -4339,7 +4397,7 @@
               </div>
               <div class="flex items-center gap-1">
                 <!-- Like -->
-                <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(item)}, event)" class="touch-target w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
+                <button data-action="toggle-like" data-track-id="${escapeHtml(item.id)}" class="touch-target w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
                   <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
                 </button>
                 <!-- Unified Download / Add to Playlist / Progress Ring -->
@@ -4451,6 +4509,8 @@
         }
 
         mergedTracks.forEach((t, i) => {
+          registerTrack(t);
+          const tid = escapeHtml(t.id);
           const row = document.createElement('div');
           row.className = "glass-card p-2.5 rounded-xl flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer";
           row.onclick = () => playTrackFromList(t, mergedTracks, 'playlist', 'Downloaded Songs');
@@ -4459,7 +4519,7 @@
           if (t.isOnDevice) {
             badgeMarkup = `<span class="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 font-medium inline-flex items-center gap-1"><svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>On Device</span>`;
           } else {
-            badgeMarkup = `<button onclick="event.stopPropagation(); downloadSingleTrack('${t.id}', '${escapeQuotes(t.title)}', '${escapeQuotes(t.artist || '')}', '${escapeQuotes(t.thumbnail || '')}')" class="text-[10px] text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 py-1 rounded-full border border-emerald-500/20 font-medium inline-flex items-center gap-1 transition"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Save Offline</button>`;
+            badgeMarkup = `<button data-action="save-offline" data-track-id="${tid}" class="text-[10px] text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 py-1 rounded-full border border-emerald-500/20 font-medium inline-flex items-center gap-1 transition"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Save Offline</button>`;
           }
 
           row.innerHTML = `
@@ -4480,12 +4540,12 @@
             </div>
             <div class="flex items-center gap-1">
               <!-- Add to Playlist -->
-              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(t)})" class="touch-target w-11 h-11 flex items-center justify-center rounded-full text-emerald-400 hover:text-emerald-300 hover:bg-white/5 active:scale-95 transition" title="Add to Playlist">
+              <button data-action="add-to-playlist" data-track-id="${tid}" class="touch-target w-11 h-11 flex items-center justify-center rounded-full text-emerald-400 hover:text-emerald-300 hover:bg-white/5 active:scale-95 transition" title="Add to Playlist">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
               </button>
               ${renderContextMenuBtnHtml(t)}
               <!-- Delete from Library -->
-              <button onclick="event.stopPropagation(); deleteOfflineTrack('${t.id}', '${escapeQuotes(t.title)}')" class="touch-target w-11 h-11 flex items-center justify-center rounded-full text-red-400 hover:text-red-300 hover:bg-white/5 active:scale-95 transition" title="Delete Track">
+              <button data-action="delete-offline" data-track-id="${tid}" class="touch-target w-11 h-11 flex items-center justify-center rounded-full text-red-400 hover:text-red-300 hover:bg-white/5 active:scale-95 transition" title="Delete Track">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
               </button>
             </div>
@@ -4568,6 +4628,8 @@
       }
 
       data.tracks.forEach((t, i) => {
+        registerTrack(t);
+        const tid = escapeHtml(t.id);
         const isDownloaded = offlineTrackIdSet.has(t.id) || (t.original_id && offlineTrackIdSet.has(t.original_id));
         const isLiked = userLikedTrackIds.has(t.id) || (t.original_id && userLikedTrackIds.has(t.original_id));
         const row = document.createElement('div');
@@ -4579,14 +4641,14 @@
           // User custom playlist: if downloaded show "On Phone" badge, otherwise offer download button
           actionButtonsHtml = `
             ${isDownloaded ? '<span class="text-xs text-emerald-400 font-medium px-2.5 py-1 bg-emerald-500/10 rounded-full border border-emerald-500/20">On Phone</span>' : renderDownloadBtnHtml(t)}
-            <button onclick="event.stopPropagation(); removeTrackFromCustomPlaylist('${playlistId}', '${t.id}', event)" class="touch-target w-11 h-11 flex items-center justify-center rounded-full text-red-400 hover:text-red-300 hover:bg-white/5 active:scale-95 transition" title="Remove from Playlist">
+            <button data-action="remove-from-playlist" data-playlist-id="${escapeHtml(playlistId)}" data-track-id="${tid}" class="touch-target w-11 h-11 flex items-center justify-center rounded-full text-red-400 hover:text-red-300 hover:bg-white/5 active:scale-95 transition" title="Remove from Playlist">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
             </button>
           `;
         } else {
           // System / Explore playlist: show like and download
           actionButtonsHtml = `
-            <button onclick="event.stopPropagation(); toggleLikeTrack(${escapeTrackObj(t)}, event)" class="touch-target w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
+            <button data-action="toggle-like" data-track-id="${tid}" class="touch-target w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}" title="Like">
               <svg class="w-4 h-4" ${isLiked ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
             </button>
             ${renderDownloadBtnHtml(t)}
@@ -4742,6 +4804,8 @@
 
         const fragment = document.createDocumentFragment();
         tracks.forEach(track => {
+          registerTrack(track);
+          const tid = escapeHtml(track.id);
           const row = document.createElement('div');
           row.className = "glass-card p-3 rounded-2xl flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] transition cursor-pointer";
           row.onclick = () => playTrackFromList(track, tracks);
@@ -4753,18 +4817,18 @@
               </div>
             </div>
             <div class="min-w-0 flex-1">
-              <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${track.title}</span>${renderEqIndicatorHtml(track.id, track.title)}</div>
-              <div class="text-xs text-gray-400 line-clamp-1">${track.artist} • ${track.sizeFormatted || 'Offline'}</div>
+              <div class="text-sm font-semibold text-white line-clamp-1 flex items-center gap-1.5"><span class="truncate">${escapeHtml(track.title)}</span>${renderEqIndicatorHtml(track.id, track.title)}</div>
+              <div class="text-xs text-gray-400 line-clamp-1">${escapeHtml(track.artist || 'Unknown')} • ${escapeHtml(track.sizeFormatted || 'Offline')}</div>
             </div>
             <div class="flex items-center gap-1">
               <span class="text-xs text-emerald-400 font-medium px-2.5 py-1 bg-emerald-500/10 rounded-full border border-emerald-500/20">On Phone</span>
               <!-- Add to Playlist -->
-              <button onclick="event.stopPropagation(); promptAddToPlaylist(${escapeTrackObj(track)})" class="touch-target w-11 h-11 flex items-center justify-center rounded-full text-emerald-400 hover:text-emerald-300 hover:bg-white/5 active:scale-95 transition" title="Add to Playlist">
+              <button data-action="add-to-playlist" data-track-id="${tid}" class="touch-target w-11 h-11 flex items-center justify-center rounded-full text-emerald-400 hover:text-emerald-300 hover:bg-white/5 active:scale-95 transition" title="Add to Playlist">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
               </button>
               ${renderContextMenuBtnHtml(track)}
               <!-- Delete from Device -->
-              <button onclick="event.stopPropagation(); deleteOfflineTrack('${track.id}', '${escapeQuotes(track.title)}')" class="touch-target w-11 h-11 flex items-center justify-center rounded-full text-red-400 hover:text-red-300 hover:bg-white/5 active:scale-95 transition" title="Delete from Device">
+              <button data-action="delete-offline" data-track-id="${tid}" class="touch-target w-11 h-11 flex items-center justify-center rounded-full text-red-400 hover:text-red-300 hover:bg-white/5 active:scale-95 transition" title="Delete from Device">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
               </button>
             </div>
@@ -5465,7 +5529,7 @@
           </div>
           <div class="flex items-center gap-2 pl-2">
             <span class="text-gray-500 font-mono text-[10px]">${item.duration || ''}</span>
-            <button onclick="removeFromQueue(${item._realIdx}, event)" class="touch-target w-9 h-9 flex items-center justify-center text-gray-500 hover:text-red-400 rounded-lg hover:bg-white/10 transition" title="Remove from queue">
+            <button data-action="remove-from-queue" data-queue-idx="${item._realIdx}" class="touch-target w-9 h-9 flex items-center justify-center text-gray-500 hover:text-red-400 rounded-lg hover:bg-white/10 transition" title="Remove from queue">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
           </div>
@@ -5475,6 +5539,7 @@
 
       // Helper to render a radio recommendation item row
       function createRadioItemRow(item) {
+        registerTrack(item);
         const row = document.createElement('div');
         row.className = "flex items-center justify-between p-2 rounded-xl bg-white/[0.03] hover:bg-white/10 active:scale-[0.99] transition cursor-pointer text-xs group";
         row.onclick = () => {
@@ -5493,7 +5558,7 @@
           </div>
           <div class="flex items-center gap-1 pl-2">
             <span class="text-gray-500 font-mono text-[10px] mr-1">${item.duration || ''}</span>
-            <button onclick="event.stopPropagation(); playTrackNext(${escapeTrackObj(item)})" class="touch-target h-9 px-2 text-emerald-400 hover:text-emerald-200 rounded-lg hover:bg-emerald-500/20 transition flex items-center gap-1 text-[11px] font-medium" title="Play next">
+            <button data-action="play-next" data-track-id="${escapeHtml(item.id)}" class="touch-target h-9 px-2 text-emerald-400 hover:text-emerald-200 rounded-lg hover:bg-emerald-500/20 transition flex items-center gap-1 text-[11px] font-medium" title="Play next">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
             </button>
           </div>

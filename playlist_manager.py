@@ -532,4 +532,3 @@ def is_track_in_library(user_id: str, track_id: str) -> bool:
         return existing.total_items > 0
     except Exception:
         return False
-        return False

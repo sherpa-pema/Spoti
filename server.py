@@ -98,10 +98,14 @@ _CACHE_LOCK = threading.Lock()
 _RESOLVE_CACHE: TTLCache = TTLCache(maxsize=300, ttl=86400)
 _RESOLVE_LOCK = threading.Lock()
 
-# Allow requests from local LAN devices, private subnets (including 172.16/12), and tunnels
+# Deduplication for concurrent stream cache disk writes: video_id set
+_ACTIVE_STREAM_WRITERS: set = set()
+_STREAM_WRITER_LOCK = threading.Lock()
+
+# Allow requests from local LAN devices, private subnets (including 172.16/12), and pinned DuckDNS domain
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+|[a-zA-Z0-9.-]+\.duckdns\.org|[a-zA-Z0-9.-]+\.trycloudflare\.com|[a-zA-Z0-9.-]+\.ngrok-free\.(app|dev))(:\d+)?$",
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+|hamrospoti\.duckdns\.org)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -312,6 +316,11 @@ def trigger_daily_fetch_if_stale(force: bool = False) -> bool:
 def load_explore_from_pocketbase() -> Optional[Dict[str, Any]]:
     """Loads curated Explore data from PocketBase collections."""
     try:
+        # If daily fetcher sync is actively in progress, serve from atomic JSON fallback
+        meta = get_explore_cache_meta()
+        if meta.get("sync_in_progress", False):
+            return None
+
         pb = database.get_pb()
         trending_recs = pb.collection("trending").get_full_list(query_params={"sort": "rank"})
         billboard_recs = pb.collection("billboard").get_full_list(query_params={"sort": "rank"})
@@ -319,6 +328,10 @@ def load_explore_from_pocketbase() -> Optional[Dict[str, Any]]:
         genres_recs = pb.collection("genres").get_full_list(query_params={"sort": "genre_id"})
 
         if not trending_recs and not billboard_recs:
+            return None
+
+        # Guard against reading partial collections during an active sync
+        if len(trending_recs) < 5 and len(billboard_recs) < 5:
             return None
 
         trending = [{
@@ -463,8 +476,10 @@ def get_home_feed():
 
 
 @app.post("/api/home/refresh")
-def force_refresh_home_feed():
-    """Forces an immediate on-demand upstream fetch for Trending, Billboard, and New Releases."""
+@limiter.limit("10/minute")
+def force_refresh_home_feed(request: Request, authorization: Optional[str] = Header(None)):
+    """Forces an immediate on-demand upstream fetch for Trending, Billboard, and New Releases (requires auth)."""
+    user = get_current_user(authorization)
     triggered = trigger_daily_fetch_if_stale(force=True)
     return {
         "success": True,
@@ -765,14 +780,22 @@ def check_user_library_track(
 # Audio Playback, Radio & Download Endpoints
 # -------------------------------------------------------------
 @app.get("/api/radio/{video_id}")
-def get_radio(video_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{11}$")):
+@limiter.limit("30/minute")
+def get_radio(
+    request: Request,
+    video_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{11}$")
+):
     """Generates continuous radio recommendations based on a track."""
     tracks = music_api.get_radio_tracks(video_id, limit=35)
     return {"tracks": tracks}
 
 
 @app.get("/api/stream/{video_id}")
-def get_stream(video_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{11}$")):
+@limiter.limit("60/minute")
+def get_stream(
+    request: Request,
+    video_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{11}$")
+):
     """Resolves audio stream URL or local downloaded file path."""
     try:
         data = stream_downloader.get_cached_or_local_stream(video_id)
@@ -783,6 +806,7 @@ def get_stream(video_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{11}$")):
 
 
 @app.api_route("/api/download/stream/{video_id}", methods=["GET", "HEAD"])
+@limiter.limit("60/minute")
 def stream_download_proxy(
     request: Request,
     video_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{11}$")
@@ -882,12 +906,19 @@ def stream_download_proxy(
         def iter_chunks():
             f = None
             total_written = 0
+            should_write_cache = False
             try:
                 if can_cache_locally and not os.path.isfile(final_path):
-                    try:
-                        f = open(part_path, "wb")
-                    except Exception:
-                        f = None
+                    with _STREAM_WRITER_LOCK:
+                        if video_id not in _ACTIVE_STREAM_WRITERS and not os.path.isfile(final_path):
+                            _ACTIVE_STREAM_WRITERS.add(video_id)
+                            should_write_cache = True
+
+                    if should_write_cache:
+                        try:
+                            f = open(part_path, "wb")
+                        except Exception:
+                            f = None
 
                 for chunk in req.iter_content(chunk_size=65536):
                     if chunk:
@@ -932,12 +963,15 @@ def stream_download_proxy(
                         except Exception:
                             pass
             finally:
+                if should_write_cache:
+                    with _STREAM_WRITER_LOCK:
+                        _ACTIVE_STREAM_WRITERS.discard(video_id)
                 if f:
                     try:
                         f.close()
                     except Exception:
                         pass
-                if os.path.exists(part_path) and not os.path.exists(final_path):
+                if os.path.exists(part_path):
                     try:
                         os.remove(part_path)
                     except Exception:
@@ -975,8 +1009,8 @@ def trigger_download(
 @app.get("/api/downloads/status")
 def get_downloads_status(authorization: Optional[str] = Header(None)):
     """Returns status of ongoing and completed downloads scoped strictly to caller."""
-    user = get_current_user_optional(authorization)
-    uid = user["uid"] if user else None
+    user = get_current_user(authorization)
+    uid = user["uid"]
     with stream_downloader._DOWNLOAD_LOCK:
         return {
             vid: {
@@ -987,16 +1021,28 @@ def get_downloads_status(authorization: Optional[str] = Header(None)):
                 "error": s.get("error")
             }
             for vid, s in stream_downloader.DOWNLOAD_STATUS.items()
-            if (uid is None or s.get("user_id") == uid or s.get("user_id") is None)
+            if s.get("user_id") == uid
         }
 
 
 @app.get("/api/download/file/{video_id}")
-def serve_transient_download_file(video_id: str):
+def serve_transient_download_file(
+    video_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{11}$"),
+    authorization: Optional[str] = Header(None)
+):
     """
     Streams the transient MP3 file to the client phone and immediately deletes
     it from the iPhone 7 disk once the stream is fully delivered to the client.
+    Requires authentication and verifies caller ownership of the download.
     """
+    user = get_current_user(authorization)
+    uid = user["uid"]
+
+    with stream_downloader._DOWNLOAD_LOCK:
+        s = stream_downloader.DOWNLOAD_STATUS.get(video_id)
+        if not s or s.get("user_id") != uid:
+            raise HTTPException(status_code=404, detail="File expired or not found")
+
     file_path = stream_downloader.get_transient_track_path(video_id)
     if not file_path or not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="File expired or not found")
@@ -1019,21 +1065,36 @@ def serve_transient_download_file(video_id: str):
 
 
 @app.get("/api/library")
-def get_library():
-    """Returns all offline downloaded songs."""
+@limiter.limit("30/minute")
+def get_library(request: Request, authorization: Optional[str] = Header(None)):
+    """Returns all offline downloaded songs (requires auth)."""
+    user = get_current_user(authorization)
     tracks = library_manager.get_library_tracks()
     return {"tracks": tracks}
 
 
 @app.get("/api/library/file/{filename}")
-def serve_library_file(filename: str):
-    """Streams a downloaded audio file from the local music library securely."""
+@limiter.limit("60/minute")
+def serve_library_file(
+    request: Request,
+    filename: str,
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = Query(None)
+):
+    """Streams a downloaded audio file from the local music library securely (requires auth)."""
+    auth_header = authorization or (f"Bearer {token}" if token else None)
+    user = get_current_user(auth_header)
     safe_name = os.path.basename(filename)
     base_dir = os.path.realpath(stream_downloader.MUSIC_DIR)
     file_path = os.path.realpath(os.path.join(base_dir, safe_name))
 
-    # Path traversal guard: must reside strictly inside MUSIC_DIR
-    if not file_path.startswith(base_dir) or not os.path.isfile(file_path):
+    # Path traversal guard: must reside strictly inside base_dir
+    try:
+        is_inside = os.path.commonpath([base_dir, file_path]) == base_dir
+    except ValueError:
+        is_inside = False
+
+    if not is_inside or not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="File not found")
 
     media_type = "audio/mpeg" if safe_name.lower().endswith(".mp3") else "audio/mp4"
