@@ -6,8 +6,10 @@ import time
 import socket
 import threading
 import subprocess
+import asyncio
 from typing import Optional, Dict, Any, List
 import requests
+import httpx
 from fastapi import FastAPI, Query, Path, HTTPException, Header, Request, Depends
 from fastapi.responses import FileResponse, Response, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -807,15 +809,16 @@ def get_stream(
 
 @app.api_route("/api/download/stream/{video_id}", methods=["GET", "HEAD"])
 @limiter.limit("60/minute")
-def stream_download_proxy(
+async def stream_download_proxy(
     request: Request,
     video_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]{11}$")
 ):
     """
-    High-performance audio streaming endpoint.
+    High-performance async audio streaming endpoint.
     1. Serves directly from server SSD cache (/var/mobile/server/data/music_cache) if present (<10ms).
     2. Streams from upstream Google CDN forwarding HTTP Range headers for smooth Safari seeking.
-    3. Caches full streams to disk with worker-isolated temporary files to prevent race conditions.
+    3. Asynchronous non-blocking chunk streaming via httpx.AsyncClient + client.stream to eliminate threadpool pinning.
+    4. Caches full streams to disk with worker-isolated temporary files to prevent race conditions.
     """
     try:
         # Check if local cached audio exists first
@@ -832,7 +835,7 @@ def stream_download_proxy(
             # Return inline audio stream without forcing attachment download
             return FileResponse(local_path, media_type=media_type)
 
-        data = stream_downloader.get_cached_or_local_stream(video_id)
+        data = await asyncio.to_thread(stream_downloader.get_cached_or_local_stream, video_id)
         stream_url = data.get("url")
         if not stream_url:
             raise HTTPException(status_code=404, detail="Could not resolve stream URL")
@@ -844,19 +847,28 @@ def stream_download_proxy(
         if client_range:
             upstream_headers["Range"] = client_range
 
-        # Stream directly from upstream Google CDN
-        req = requests.get(
-            stream_url,
-            stream=True,
-            timeout=20,
-            headers=upstream_headers
+        # Stream directly from upstream Google CDN asynchronously without pinning worker threads
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=15.0, read=30.0, write=15.0, pool=30.0),
+            follow_redirects=True
         )
-        if req.status_code not in (200, 206):
-            raise HTTPException(status_code=req.status_code, detail="Upstream stream fetch failed")
+        stream_ctx = client.stream("GET", stream_url, headers=upstream_headers)
+        try:
+            upstream_resp = await stream_ctx.__aenter__()
+        except Exception as e:
+            await client.aclose()
+            print(f"Upstream stream connection error for {video_id}: {e}", file=sys.stderr)
+            raise HTTPException(status_code=502, detail="Upstream audio stream unavailable")
 
-        content_length = req.headers.get("Content-Length")
-        content_type = req.headers.get("Content-Type", "audio/mp4")
-        content_range = req.headers.get("Content-Range")
+        if upstream_resp.status_code not in (200, 206):
+            status = upstream_resp.status_code
+            await stream_ctx.__aexit__(None, None, None)
+            await client.aclose()
+            raise HTTPException(status_code=status, detail="Upstream stream fetch failed")
+
+        content_length = upstream_resp.headers.get("Content-Length")
+        content_type = upstream_resp.headers.get("Content-Type", "audio/mp4")
+        content_range = upstream_resp.headers.get("Content-Range")
 
         headers = {
             "Accept-Ranges": "bytes",
@@ -868,8 +880,9 @@ def stream_download_proxy(
             headers["Content-Range"] = content_range
 
         if request.method == "HEAD":
-            req.close()
-            return Response(status_code=req.status_code, headers=headers, media_type=content_type)
+            await stream_ctx.__aexit__(None, None, None)
+            await client.aclose()
+            return Response(status_code=upstream_resp.status_code, headers=headers, media_type=content_type)
 
         import uuid
         worker_id = uuid.uuid4().hex[:6]
@@ -880,11 +893,11 @@ def stream_download_proxy(
         expected_total_bytes = None
         is_full_stream = False
 
-        if req.status_code == 200:
+        if upstream_resp.status_code == 200:
             if content_length and content_length.isdigit():
                 expected_total_bytes = int(content_length)
                 is_full_stream = True
-        elif req.status_code == 206 and content_range:
+        elif upstream_resp.status_code == 206 and content_range:
             # Format: bytes start-end/total
             cr_match = re.match(r"^bytes\s+(\d+)-(\d+)/(\d+)$", content_range.strip())
             if cr_match:
@@ -903,7 +916,7 @@ def stream_download_proxy(
             (not client_range or client_range.strip() in ("", "bytes=0-"))
         )
 
-        def iter_chunks():
+        async def iter_chunks():
             f = None
             total_written = 0
             should_write_cache = False
@@ -920,7 +933,7 @@ def stream_download_proxy(
                         except Exception:
                             f = None
 
-                for chunk in req.iter_content(chunk_size=65536):
+                async for chunk in upstream_resp.aiter_bytes(chunk_size=65536):
                     if chunk:
                         if f:
                             try:
@@ -976,11 +989,18 @@ def stream_download_proxy(
                         os.remove(part_path)
                     except Exception:
                         pass
-                req.close()
+                try:
+                    await stream_ctx.__aexit__(None, None, None)
+                except Exception:
+                    pass
+                try:
+                    await client.aclose()
+                except Exception:
+                    pass
 
         return StreamingResponse(
             iter_chunks(),
-            status_code=req.status_code,
+            status_code=upstream_resp.status_code,
             media_type=content_type,
             headers=headers
         )

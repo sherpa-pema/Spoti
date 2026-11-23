@@ -25,6 +25,7 @@ import re
 import argparse
 import urllib.request
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional
 
 try:
@@ -452,7 +453,8 @@ def fetch_genres() -> List[Dict[str, Any]]:
                 if g not in selected:
                     selected.append(g)
 
-            for idx, g in enumerate(selected, start=1):
+            def _fetch_single_genre(item_tuple):
+                idx, g = item_tuple
                 gtitle = g.get("title", f"Genre {idx}")
                 gparams = g.get("params", "")
                 tracks = []
@@ -486,12 +488,16 @@ def fetch_genres() -> List[Dict[str, Any]]:
                         print(f"Warning: Failed to fetch tracks for YouTube Music genre {gtitle}: {e}")
 
                 cover = tracks[0]["thumbnail"] if tracks else "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500"
-                genres_list.append({
+                return {
                     "genre_id": idx,
                     "name": gtitle,
                     "picture": cover,
                     "tracks": tracks[:15]
-                })
+                }
+
+            items_to_fetch = list(enumerate(selected, start=1))
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                genres_list = list(executor.map(_fetch_single_genre, items_to_fetch))
 
         except Exception as e:
             print(f"Error fetching YouTube Music genres: {e}")
@@ -517,7 +523,7 @@ def fetch_genres() -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Persistence: PocketBase + JSON Backup
 # ---------------------------------------------------------------------------
-def get_pb_token() -> Optional[str]:
+def get_pb_token(session: Optional[Any] = None) -> Optional[str]:
     email = os.environ.get("PB_SUPERUSER_EMAIL") or SUPERUSER_EMAIL
     pwd = os.environ.get("PB_SUPERUSER_PASSWORD") or os.environ.get("PB_SUPERUSER_PASS") or SUPERUSER_PASS
     if not email or not pwd:
@@ -525,56 +531,97 @@ def get_pb_token() -> Optional[str]:
         return None
     try:
         url = f"{PB_URL}/api/collections/_superusers/auth-with-password"
-        payload = json.dumps({"identity": email, "password": pwd}).encode("utf-8")
-        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return data.get("token")
+        payload = {"identity": email, "password": pwd}
+        if session:
+            resp = session.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
+            if resp.status_code == 200:
+                return resp.json().get("token")
+        elif requests:
+            resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
+            if resp.status_code == 200:
+                return resp.json().get("token")
+        else:
+            req_data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(url, data=req_data, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                return data.get("token")
     except Exception as e:
         print(f"PocketBase auth failed: {e}")
         return None
 
 
-def clear_and_bulk_insert_pb(token: str, collection_name: str, records: List[Dict[str, Any]]) -> bool:
-    """Replaces previous daily records with fresh daily records in PocketBase (inserts new records first, then purges old records)."""
+def clear_and_bulk_insert_pb(token: str, collection_name: str, records: List[Dict[str, Any]], session: Optional[Any] = None) -> bool:
+    """Replaces previous daily records with fresh daily records in PocketBase reusing persistent HTTP keep-alive connections (inserts new records first, then purges old records)."""
     headers = {"Authorization": token, "Content-Type": "application/json"}
+    http = session or (requests.Session() if requests else None)
+    own_session = (session is None and http is not None)
     try:
         # 1. Fetch existing record IDs to remove after inserting new ones
         list_url = f"{PB_URL}/api/collections/{collection_name}/records?page=1&perPage=500"
-        req = urllib.request.Request(list_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            items = data.get("items", [])
-            old_item_ids = [item['id'] for item in items if 'id' in item]
+        if http:
+            resp = http.get(list_url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                print(f"Failed to list existing records for '{collection_name}': {resp.status_code}")
+                old_item_ids = []
+            else:
+                data = resp.json()
+                items = data.get("items", [])
+                old_item_ids = [item['id'] for item in items if 'id' in item]
+        else:
+            req = urllib.request.Request(list_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                items = data.get("items", [])
+                old_item_ids = [item['id'] for item in items if 'id' in item]
 
         # 2. Insert fresh records FIRST so the collection is never empty or partial
         create_url = f"{PB_URL}/api/collections/{collection_name}/records"
         inserted_count = 0
         for rec in records:
-            payload = json.dumps(rec).encode("utf-8")
-            c_req = urllib.request.Request(create_url, data=payload, headers=headers)
-            try:
-                urllib.request.urlopen(c_req, timeout=5)
-                inserted_count += 1
-            except Exception as e:
-                # continue inserting even if single record fails
-                pass
+            if http:
+                try:
+                    r = http.post(create_url, json=rec, headers=headers, timeout=5)
+                    if r.status_code in (200, 201):
+                        inserted_count += 1
+                except Exception:
+                    pass
+            else:
+                payload = json.dumps(rec).encode("utf-8")
+                c_req = urllib.request.Request(create_url, data=payload, headers=headers)
+                try:
+                    urllib.request.urlopen(c_req, timeout=5)
+                    inserted_count += 1
+                except Exception:
+                    pass
 
         # 3. Only delete old records after new records are successfully inserted
         if inserted_count > 0:
             for old_id in old_item_ids:
                 del_url = f"{PB_URL}/api/collections/{collection_name}/records/{old_id}"
-                del_req = urllib.request.Request(del_url, headers=headers, method="DELETE")
-                try:
-                    urllib.request.urlopen(del_req, timeout=5)
-                except Exception:
-                    pass
+                if http:
+                    try:
+                        http.delete(del_url, headers=headers, timeout=5)
+                    except Exception:
+                        pass
+                else:
+                    del_req = urllib.request.Request(del_url, headers=headers, method="DELETE")
+                    try:
+                        urllib.request.urlopen(del_req, timeout=5)
+                    except Exception:
+                        pass
 
         print(f"Successfully saved {len(records)} records to PocketBase collection '{collection_name}'")
         return True
     except Exception as e:
         print(f"Error persisting to PocketBase collection '{collection_name}': {e}")
         return False
+    finally:
+        if own_session and http:
+            try:
+                http.close()
+            except Exception:
+                pass
 
 
 def save_json_fallback(filename: str, data: Any):
@@ -665,17 +712,25 @@ def main():
 
         # 4. Save to PocketBase (insert new records first, then delete old records)
         pb_success = True
-        token = get_pb_token()
-        if token:
-            print("Connected to PocketBase as superuser.")
-            s1 = clear_and_bulk_insert_pb(token, "trending", trending)
-            s2 = clear_and_bulk_insert_pb(token, "billboard", billboard_hits)
-            s3 = clear_and_bulk_insert_pb(token, "new_releases", new_releases)
-            s4 = clear_and_bulk_insert_pb(token, "genres", genres)
-            pb_success = all([s1, s2, s3, s4])
-        else:
-            print("PocketBase unreachable or login failed. Falling back completely to JSON storage.")
-            pb_success = False
+        pb_session = requests.Session() if requests else None
+        try:
+            token = get_pb_token(session=pb_session)
+            if token:
+                print("Connected to PocketBase as superuser.")
+                s1 = clear_and_bulk_insert_pb(token, "trending", trending, session=pb_session)
+                s2 = clear_and_bulk_insert_pb(token, "billboard", billboard_hits, session=pb_session)
+                s3 = clear_and_bulk_insert_pb(token, "new_releases", new_releases, session=pb_session)
+                s4 = clear_and_bulk_insert_pb(token, "genres", genres, session=pb_session)
+                pb_success = all([s1, s2, s3, s4])
+            else:
+                print("PocketBase unreachable or login failed. Falling back completely to JSON storage.")
+                pb_success = False
+        finally:
+            if pb_session:
+                try:
+                    pb_session.close()
+                except Exception:
+                    pass
 
         # 5. Update Cache Metadata atomically
         cache_meta = {

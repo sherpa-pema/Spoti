@@ -789,7 +789,8 @@ def test_clear_and_bulk_insert_pb_inserts_before_delete():
         {"title": "Song 2", "rank": 2}
     ]
 
-    with unittest.mock.patch("urllib.request.urlopen", side_effect=mock_urlopen):
+    with unittest.mock.patch("daily_fetcher.requests", None), \
+         unittest.mock.patch("urllib.request.urlopen", side_effect=mock_urlopen):
         success = daily_fetcher.clear_and_bulk_insert_pb("mock_token", "trending", new_records)
         assert success is True
 
@@ -829,6 +830,208 @@ def test_load_explore_from_pocketbase_serves_json_when_sync_in_progress():
          unittest.mock.patch("database.get_pb", return_value=mock_pb):
         res = server.load_explore_from_pocketbase()
         assert res is None
+
+
+def test_stream_download_proxy_is_async_def():
+    """Validates that stream_download_proxy is an async def coroutine function, avoiding AnyIO threadpool starvation."""
+    import server
+    import inspect
+    assert inspect.iscoroutinefunction(server.stream_download_proxy), "stream_download_proxy must be an async def function!"
+
+
+def test_stream_download_proxy_async_httpx_streaming():
+    """Validates that stream_download_proxy streams chunks asynchronously via httpx.AsyncClient + client.stream."""
+    import server
+    from starlette.testclient import TestClient
+
+    with unittest.mock.patch("stream_downloader.get_cached_audio_path", return_value=None), \
+         unittest.mock.patch("stream_downloader.get_cached_or_local_stream", return_value={"url": "http://googlecdn.com/song.m4a"}):
+
+        mock_client = unittest.mock.AsyncMock()
+        mock_resp = unittest.mock.AsyncMock()
+        mock_resp.status_code = 206
+        mock_resp.headers = {
+            "Content-Length": "12",
+            "Content-Range": "bytes 0-11/12",
+            "Content-Type": "audio/mp4"
+        }
+        async def mock_aiter_bytes(chunk_size=65536):
+            yield b"part1_"
+            yield b"part2!"
+        mock_resp.aiter_bytes = mock_aiter_bytes
+
+        mock_stream_ctx = unittest.mock.MagicMock()
+        mock_stream_ctx.__aenter__ = unittest.mock.AsyncMock(return_value=mock_resp)
+        mock_stream_ctx.__aexit__ = unittest.mock.AsyncMock(return_value=None)
+        mock_client.stream = unittest.mock.MagicMock(return_value=mock_stream_ctx)
+
+        with unittest.mock.patch("httpx.AsyncClient", return_value=mock_client):
+            client = TestClient(server.app)
+            resp = client.get("/api/download/stream/dQw4w9WgXcQ", headers={"Range": "bytes=0-11"})
+            assert resp.status_code == 206
+            assert resp.content == b"part1_part2!"
+            assert resp.headers["content-range"] == "bytes 0-11/12"
+            mock_client.stream.assert_called_once()
+            mock_stream_ctx.__aenter__.assert_called_once()
+            mock_stream_ctx.__aexit__.assert_called_once()
+
+
+def test_stream_download_proxy_head_request_clean_exit():
+    """Validates that HEAD requests return response headers and cleanly exit the stream context without consuming chunks."""
+    import server
+    from starlette.testclient import TestClient
+
+    with unittest.mock.patch("stream_downloader.get_cached_audio_path", return_value=None), \
+         unittest.mock.patch("stream_downloader.get_cached_or_local_stream", return_value={"url": "http://googlecdn.com/song.m4a"}):
+
+        mock_client = unittest.mock.AsyncMock()
+        mock_resp = unittest.mock.AsyncMock()
+        mock_resp.status_code = 206
+        mock_resp.headers = {
+            "Content-Length": "12",
+            "Content-Range": "bytes 0-11/12",
+            "Content-Type": "audio/mp4"
+        }
+
+        mock_stream_ctx = unittest.mock.MagicMock()
+        mock_stream_ctx.__aenter__ = unittest.mock.AsyncMock(return_value=mock_resp)
+        mock_stream_ctx.__aexit__ = unittest.mock.AsyncMock(return_value=None)
+        mock_client.stream = unittest.mock.MagicMock(return_value=mock_stream_ctx)
+
+        with unittest.mock.patch("httpx.AsyncClient", return_value=mock_client):
+            client = TestClient(server.app)
+            resp = client.head("/api/download/stream/dQw4w9WgXcQ", headers={"Range": "bytes=0-11"})
+            assert resp.status_code == 206
+            assert resp.content == b""
+            assert resp.headers["content-range"] == "bytes 0-11/12"
+            mock_stream_ctx.__aenter__.assert_called_once()
+            mock_stream_ctx.__aexit__.assert_called_once()
+            mock_client.aclose.assert_called_once()
+
+
+def test_clear_and_bulk_insert_pb_persistent_session():
+    """Validates that clear_and_bulk_insert_pb uses a persistent requests.Session and inserts before deleting."""
+    import daily_fetcher
+
+    mock_session = unittest.mock.MagicMock()
+    mock_get_resp = unittest.mock.MagicMock()
+    mock_get_resp.status_code = 200
+    mock_get_resp.json.return_value = {"items": [{"id": "old_1"}, {"id": "old_2"}]}
+    mock_session.get.return_value = mock_get_resp
+
+    mock_post_resp = unittest.mock.MagicMock()
+    mock_post_resp.status_code = 201
+    mock_session.post.return_value = mock_post_resp
+
+    mock_del_resp = unittest.mock.MagicMock()
+    mock_del_resp.status_code = 200
+    mock_session.delete.return_value = mock_del_resp
+
+    new_records = [
+        {"title": "Track A", "rank": 1},
+        {"title": "Track B", "rank": 2}
+    ]
+
+    success = daily_fetcher.clear_and_bulk_insert_pb("mock_token", "trending", new_records, session=mock_session)
+    assert success is True
+
+    # Validate calls made on the persistent session
+    mock_session.get.assert_called_once()
+    assert mock_session.post.call_count == 2
+    assert mock_session.delete.call_count == 2
+
+    # Check order: GET before POSTs, POSTs before DELETEs
+    call_names = [c[0] for c in mock_session.method_calls]
+    assert call_names[0] == "get"
+    assert call_names[1] == "post"
+    assert call_names[2] == "post"
+    assert call_names[3] == "delete"
+    assert call_names[4] == "delete"
+
+
+def test_get_pb_token_with_session():
+    """Validates that get_pb_token reuses the provided requests.Session."""
+    import daily_fetcher
+
+    mock_session = unittest.mock.MagicMock()
+    mock_resp = unittest.mock.MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"token": "test_token_123"}
+    mock_session.post.return_value = mock_resp
+
+    with unittest.mock.patch.dict(os.environ, {"PB_SUPERUSER_EMAIL": "admin@test.com", "PB_SUPERUSER_PASSWORD": "pass"}):
+        token = daily_fetcher.get_pb_token(session=mock_session)
+        assert token == "test_token_123"
+        mock_session.post.assert_called_once()
+
+
+def test_fetch_genres_threadpool_concurrency():
+    """Validates that fetch_genres fetches categories concurrently using ThreadPoolExecutor and retains order."""
+    import sys
+    import daily_fetcher
+
+    mock_nav_mod = unittest.mock.MagicMock()
+    mock_nav_mod.SINGLE_COLUMN_TAB = ["contents", "singleColumnBrowseResultsRenderer", "tabs", 0, "tabRenderer", "content"]
+    mock_nav_mod.SECTION_LIST = ["sectionListRenderer", "contents"]
+    def fake_nav(root, path):
+        curr = root
+        for k in path:
+            curr = curr[k]
+        return curr
+    mock_nav_mod.nav = fake_nav
+
+    mock_ytm = unittest.mock.MagicMock()
+    mock_ytm.get_mood_categories.return_value = {
+        "Genres": [
+            {"title": "Pop", "params": "p_pop"},
+            {"title": "Rock", "params": "p_rock"},
+            {"title": "Jazz", "params": "p_jazz"},
+        ]
+    }
+    def mock_send(endpoint, body):
+        genre_param = body.get("params")
+        return {
+            "contents": {
+                "singleColumnBrowseResultsRenderer": {
+                    "tabs": [{
+                        "tabRenderer": {
+                            "content": {
+                                "sectionListRenderer": {
+                                    "contents": [{
+                                        "musicCarouselShelfRenderer": {
+                                            "contents": [{
+                                                "musicResponsiveListItemRenderer": {
+                                                    "flexColumns": [
+                                                        {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": f"Song {genre_param}"}]}}},
+                                                        {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Artist"}]}}}
+                                                    ],
+                                                    "playlistItemData": {"videoId": f"vid_{genre_param}"},
+                                                    "thumbnail": {"musicThumbnailRenderer": {"thumbnail": {"thumbnails": [{"url": "http://thumb"}]}}}
+                                                }
+                                            }]
+                                        }
+                                    }]
+                                }
+                            }
+                        }
+                    }]
+                }
+            }
+        }
+    mock_ytm._send_request.side_effect = mock_send
+
+    with unittest.mock.patch.dict(sys.modules, {"ytmusicapi": unittest.mock.MagicMock(), "ytmusicapi.navigation": mock_nav_mod}), \
+         unittest.mock.patch("daily_fetcher.YTMusic", return_value=mock_ytm):
+        genres = daily_fetcher.fetch_genres()
+        assert len(genres) == 3
+        # Check that order is strictly preserved
+        assert genres[0]["name"] == "Pop"
+        assert genres[0]["tracks"][0]["id"] == "vid_p_pop"
+        assert genres[1]["name"] == "Rock"
+        assert genres[1]["tracks"][0]["id"] == "vid_p_rock"
+        assert genres[2]["name"] == "Jazz"
+        assert genres[2]["tracks"][0]["id"] == "vid_p_jazz"
+
 
 
 
