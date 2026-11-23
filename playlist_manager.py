@@ -88,16 +88,26 @@ def get_all_playlists(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
             query_params={"filter": f'user = "{esc_uid}"', "sort": "-created"}
         )
 
-        for pl in playlists_res:
-            # Query track count
+        # Aggregate track counts in a single query across all user playlists (O(1) queries instead of O(N))
+        track_counts: Dict[str, int] = {}
+        if playlists_res:
             try:
-                esc_pid = database.pb_escape(pl.id)
-                tracks_check = admin_pb.collection("playlist_tracks").get_list(
-                    1, 1, query_params={"filter": f'playlist = "{esc_pid}"'}
+                tracks_res = admin_pb.collection("playlist_tracks").get_full_list(
+                    query_params={
+                        "filter": f'playlist.user = "{esc_uid}"',
+                        "fields": "id,playlist"
+                    }
                 )
-                cnt = tracks_check.total_items
-            except Exception:
-                cnt = 0
+                from collections import Counter
+                track_counts = Counter(getattr(t, "playlist", None) for t in tracks_res)
+            except Exception as e:
+                track_counts = {}
+
+        for pl in playlists_res:
+            # Check denormalized track_count if present, else use single aggregated count
+            cnt = getattr(pl, "track_count", None)
+            if cnt is None or not isinstance(cnt, int):
+                cnt = track_counts.get(pl.id, 0)
 
             thumb = getattr(pl, "thumbnail", "") or "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80"
 

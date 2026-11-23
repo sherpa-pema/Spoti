@@ -243,28 +243,36 @@ def test_serve_transient_download_file_security(tmp_path):
 
 
 def test_no_inline_onclick_track_interpolation_in_index_html():
-    """Validates that index.html never interpolates track objects or titles into inline onclick attributes."""
+    """Validates that frontend code never interpolates track objects or titles into inline onclick attributes."""
     index_path = os.path.join(PROJECT_DIR, "static", "index.html")
+    app_js_path = os.path.join(PROJECT_DIR, "static", "js", "app.js")
     assert os.path.isfile(index_path)
 
     with open(index_path, "r", encoding="utf-8") as f:
-        content = f.read()
+        html_content = f.read()
+
+    js_content = ""
+    if os.path.isfile(app_js_path):
+        with open(app_js_path, "r", encoding="utf-8") as f:
+            js_content = f.read()
+
+    combined = html_content + "\n" + js_content
 
     # Ensure no onclick attributes call escapeQuotes or escapeTrackObj
-    assert "onclick=" not in content or "escapeQuotes" not in content.split("onclick=")[1]
+    assert "onclick=" not in html_content or "escapeQuotes" not in html_content.split("onclick=")[1]
     import re
-    assert not re.search(r'onclick=[\'"][^\'"]*escapeTrackObj', content)
-    assert not re.search(r'onclick=[\'"][^\'"]*escapeQuotes', content)
+    assert not re.search(r'onclick=[\'"][^\'"]*escapeTrackObj', html_content)
+    assert not re.search(r'onclick=[\'"][^\'"]*escapeQuotes', html_content)
 
     # Ensure data-action pattern is present
-    assert 'data-action="context-menu"' in content
-    assert 'data-action="prompt-download"' in content
-    assert 'data-action="toggle-like"' in content
-    assert 'data-action="save-offline"' in content
-    assert 'data-action="add-to-playlist"' in content
-    assert 'data-action="delete-offline"' in content
-    assert 'data-action="remove-from-playlist"' in content
-    assert 'data-action="play-next"' in content
+    assert 'data-action="context-menu"' in combined
+    assert 'data-action="prompt-download"' in combined
+    assert 'data-action="toggle-like"' in combined
+    assert 'data-action="save-offline"' in combined
+    assert 'data-action="add-to-playlist"' in combined
+    assert 'data-action="delete-offline"' in combined
+    assert 'data-action="remove-from-playlist"' in combined
+    assert 'data-action="play-next"' in combined
 
 
 def test_resource_exhaustion_endpoints_auth_and_throttling():
@@ -451,10 +459,12 @@ def test_verify_token_jwt_exp_handling_and_capping():
 
 def test_pending_lib_ops_localstorage_key_standardization():
     """Validates that offline library ops use PENDING_LIB_OPS_KEY = 'spoti_pending_lib_ops' across get, save, and initAuth."""
+    app_js_path = os.path.join(PROJECT_DIR, "static", "js", "app.js")
     index_path = os.path.join(PROJECT_DIR, "static", "index.html")
-    assert os.path.isfile(index_path)
+    target_path = app_js_path if os.path.isfile(app_js_path) else index_path
+    assert os.path.isfile(target_path)
 
-    with open(index_path, "r", encoding="utf-8") as f:
+    with open(target_path, "r", encoding="utf-8") as f:
         content = f.read()
 
     # 1. Constant definition
@@ -1031,6 +1041,96 @@ def test_fetch_genres_threadpool_concurrency():
         assert genres[1]["tracks"][0]["id"] == "vid_p_rock"
         assert genres[2]["name"] == "Jazz"
         assert genres[2]["tracks"][0]["id"] == "vid_p_jazz"
+
+
+def test_get_all_playlists_single_aggregated_tracks_query():
+    """Validates that get_all_playlists aggregates track counts in 1 single query instead of N+1 queries."""
+    import playlist_manager
+
+    mock_admin_pb = unittest.mock.MagicMock()
+
+    # Mock 3 user playlists
+    p1 = unittest.mock.MagicMock()
+    p1.id = "pl_1"
+    p1.title = "Playlist 1"
+    p1.created = "2026-10-19T00:00:00Z"
+    p1.track_count = None
+
+    p2 = unittest.mock.MagicMock()
+    p2.id = "pl_2"
+    p2.title = "Playlist 2"
+    p2.created = "2026-10-19T00:00:00Z"
+    p2.track_count = None
+
+    p3 = unittest.mock.MagicMock()
+    p3.id = "pl_3"
+    p3.title = "Playlist 3"
+    p3.created = "2026-10-19T00:00:00Z"
+    p3.track_count = None
+
+    mock_admin_pb.collection.return_value.get_full_list.side_effect = [
+        [p1, p2, p3],  # playlists.get_full_list
+        [              # playlist_tracks.get_full_list
+            unittest.mock.MagicMock(playlist="pl_1"),
+            unittest.mock.MagicMock(playlist="pl_1"),
+            unittest.mock.MagicMock(playlist="pl_2"),
+        ]
+    ]
+
+    with unittest.mock.patch("database.get_admin_pb", return_value=mock_admin_pb), \
+         unittest.mock.patch("playlist_manager.get_user_liked_tracks", return_value=[]), \
+         unittest.mock.patch("playlist_manager.get_user_library_tracks", return_value=[]):
+
+        playlists = playlist_manager.get_all_playlists("test_user_id")
+
+        # Crucial: playlist_tracks.get_list must NOT be called in a loop (0 calls)
+        mock_admin_pb.collection("playlist_tracks").get_list.assert_not_called()
+
+        user_pls = [p for p in playlists if p.get("is_user_playlist")]
+        assert len(user_pls) == 3
+        assert user_pls[0]["track_count"] == 2
+        assert user_pls[1]["track_count"] == 1
+        assert user_pls[2]["track_count"] == 0
+
+
+def test_track_registry_bounded_lru_in_app_js():
+    """Validates that trackRegistry is bounded with LRU eviction in app.js."""
+    app_js_path = os.path.join(PROJECT_DIR, "static", "js", "app.js")
+    assert os.path.isfile(app_js_path)
+
+    with open(app_js_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    assert "MAX_TRACK_REGISTRY_SIZE" in content
+    assert "trackRegistry.size >= MAX_TRACK_REGISTRY_SIZE" in content
+    assert "trackRegistry.keys().next().value" in content
+    assert "trackRegistry.delete(" in content
+
+
+def test_index_html_precompiled_tailwind_and_es_modules():
+    """Validates that index.html links precompiled tailwind.css and ES module app.js, removing cdn.tailwindcss.com."""
+    index_path = os.path.join(PROJECT_DIR, "static", "index.html")
+    tailwind_css_path = os.path.join(PROJECT_DIR, "static", "css", "tailwind.css")
+    app_js_path = os.path.join(PROJECT_DIR, "static", "js", "app.js")
+    db_js_path = os.path.join(PROJECT_DIR, "static", "js", "db.js")
+
+    assert os.path.isfile(index_path)
+    assert os.path.isfile(tailwind_css_path)
+    assert os.path.isfile(app_js_path)
+    assert os.path.isfile(db_js_path)
+
+    with open(index_path, "r", encoding="utf-8") as f:
+        html = f.read()
+
+    # Runtime Tailwind Play CDN must be completely removed
+    assert "cdn.tailwindcss.com" not in html
+    # Static precompiled CSS must be linked
+    assert '<link rel="stylesheet" href="/static/css/tailwind.css">' in html
+    # ES module script must be linked
+    assert '<script type="module" src="/static/js/app.js"></script>' in html
+    # index.html should be slimmed down significantly (< 1500 lines)
+    assert len(html.splitlines()) < 1500
+
 
 
 

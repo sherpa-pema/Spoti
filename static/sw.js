@@ -1,9 +1,11 @@
-const CACHE_NAME = 'spoti-offline-v32';
+const CACHE_NAME = 'spoti-offline-v33';
 const SHELL_ASSETS = [
   '/',
   '/static/manifest.json',
   '/static/icon.png',
-  'https://cdn.tailwindcss.com'
+  '/static/css/tailwind.css',
+  '/static/js/db.js',
+  '/static/js/app.js'
 ];
 
 self.addEventListener('install', (event) => {
@@ -102,8 +104,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 3. Static assets & Tailwind CDN
-  if (url.origin === self.location.origin || url.hostname === 'cdn.tailwindcss.com') {
+  // 3. Static assets (CSS, JS modules, images, manifest)
+  if (url.origin === self.location.origin) {
     event.respondWith(
       caches.match(event.request, { ignoreSearch: true }).then((cached) => {
         if (cached) {
