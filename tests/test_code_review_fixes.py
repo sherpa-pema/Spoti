@@ -1132,6 +1132,95 @@ def test_index_html_precompiled_tailwind_and_es_modules():
     assert len(html.splitlines()) < 1500
 
 
+def test_app_js_window_exports_defined():
+    """Validates that all window exports in app.js are defined without syntax or ReferenceErrors."""
+    import re
+    app_js_path = os.path.join(PROJECT_DIR, "static", "js", "app.js")
+    with open(app_js_path, "r", encoding="utf-8") as f:
+        code = f.read()
+
+    # Find the Object.assign(window, { ... }) block
+    match = re.search(r"Object\.assign\(window,\s*\{([^}]+)\}\)", code)
+    assert match is not None, "Object.assign(window, ...) block not found in app.js"
+
+    exported_identifiers = [s.strip() for s in match.group(1).split(",") if s.strip()]
+
+    # Critical handlers that index.html inline attributes rely on
+    required_exports = [
+        "submitAuth",
+        "switchAuthTab",
+        "closeAuthModal",
+        "openAuthModal",
+        "handleSearchKeydown",
+        "onSearchInput",
+        "onSeekChange",
+        "onSeekInput",
+        "resetViewportScroll",
+        "handleLogout",
+        "playEntirePlaylist",
+        "playNext",
+        "playPrev",
+        "togglePlayPause",
+    ]
+    for req in required_exports:
+        assert req in exported_identifiers, f"Required window export '{req}' is missing"
+
+    # None of the deprecated / undeclared identifiers must be present
+    assert "loadTrackById" not in exported_identifiers
+    assert "playSong" not in exported_identifiers
+
+    # Verify that every exported identifier is declared in app.js or imported
+    for identifier in exported_identifiers:
+        if identifier == "SpotiDB":
+            continue
+        decl_pattern = rf"\b(function|const|let|var|class)\s+{re.escape(identifier)}\b"
+        assert re.search(decl_pattern, code) is not None, (
+            f"Exported identifier '{identifier}' is not declared in app.js!"
+        )
+
+
+def test_auth_authenticate_user_fallback_query():
+    """Validates that authenticate_user uses case-insensitive name fallback in PocketBase filter."""
+    import auth
+    with unittest.mock.patch("database.get_pb") as mock_get_pb, \
+         unittest.mock.patch("database.get_admin_pb") as mock_get_admin_pb:
+
+        mock_user_pb = unittest.mock.MagicMock()
+        mock_auth_record = unittest.mock.MagicMock()
+        mock_auth_record.id = "u123"
+        mock_auth_record.name = "Tshewang"
+        mock_auth_record.created = "2026-10-19"
+        mock_auth_success = unittest.mock.MagicMock(
+            record=mock_auth_record,
+            token="jwt.token.here"
+        )
+        mock_user_pb.collection.return_value.auth_with_password.side_effect = [
+            ValueError("Auth failed"),  # first attempt with username@spoti.local
+            mock_auth_success           # second attempt with found user_email
+        ]
+        mock_get_pb.return_value = mock_user_pb
+
+        # admin_pb finds the user record via name filter
+        mock_admin_pb = unittest.mock.MagicMock()
+        mock_record = unittest.mock.MagicMock()
+        mock_record.email = "custom_email@example.com"
+        mock_record.name = "Tshewang"
+        mock_list = unittest.mock.MagicMock(total_items=1, items=[mock_record])
+        mock_admin_pb.collection.return_value.get_list.return_value = mock_list
+        mock_get_admin_pb.return_value = mock_admin_pb
+
+        res = auth.authenticate_user("tshewang", "password123")
+        assert res["id"] == "u123"
+        assert res["username"] == "Tshewang"
+        assert res["token"] == "jwt.token.here"
+
+        # Verify that the query filter included name ~
+        call_args = mock_admin_pb.collection.return_value.get_list.call_args
+        filter_str = call_args[1]["query_params"]["filter"]
+        assert 'name ~ "tshewang"' in filter_str
+
+
+
 
 
 

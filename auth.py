@@ -253,7 +253,10 @@ def authenticate_user(username: str, password: str) -> Dict[str, Any]:
         try:
             admin_pb = database.get_admin_pb()
             esc_username = database.pb_escape(username)
-            found = admin_pb.collection("users").get_list(1, 1, query_params={"filter": f'name = "{esc_username}"'})
+            # Check by name in case email differs (exact match or case-insensitive)
+            found = admin_pb.collection("users").get_list(
+                1, 1, query_params={"filter": f'name = "{esc_username}" || name ~ "{esc_username}"'}
+            )
             if found.total_items > 0:
                 user_email = found.items[0].email
                 auth_data = user_pb.collection("users").auth_with_password(user_email, password)

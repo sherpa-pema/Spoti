@@ -1573,8 +1573,13 @@ import { SpotiDB } from './db.js';
         errEl.classList.remove('hidden');
         return;
       }
-      if (!password || password.length < 4) {
-        errEl.innerText = "Password must be at least 4 characters.";
+      if (authMode === 'register' && (!password || password.length < 8)) {
+        errEl.innerText = "Password must be at least 8 characters.";
+        errEl.classList.remove('hidden');
+        return;
+      }
+      if (!password) {
+        errEl.innerText = "Please enter your password.";
         errEl.classList.remove('hidden');
         return;
       }
@@ -4673,7 +4678,11 @@ if (typeof window !== 'undefined') {
     expandTrending,
     handleAuthBackdrop,
     handleLogout,
+    handleSearchKeydown,
     loadTrending,
+    onSearchInput,
+    onSeekChange,
+    onSeekInput,
     openAuthModal,
     openCreatePlaylistModal,
     openNowPlayingDrawer,
@@ -4683,6 +4692,7 @@ if (typeof window !== 'undefined') {
     playNext,
     playPrev,
     promptDownloadTrack,
+    resetViewportScroll,
     setSearchFilter,
     setSleepTimer,
     submitAuth,
@@ -4697,8 +4707,6 @@ if (typeof window !== 'undefined') {
     toggleShuffle,
     toggleUserDropdown,
     openPlaylist,
-    loadTrackById,
-    playSong,
     openTrackContextMenu,
     seekToLyric,
     registerTrack,
